@@ -7,6 +7,10 @@ Elle affiche :
 - les points des doigts et articulations en rouge
 - les connexions de la main en vert
 - le nombre de mains detectees avec `nb_de_main`
+- le nombre de FPS
+
+Pour dessiner, leve seulement l'index et garde les autres doigts fermes.
+La couleur du trait se regle avec les curseurs `R`, `G` et `B` dans la fenetre `Couleur`.
 
 ## Installation
 
@@ -36,3 +40,4 @@ python hand_tracking.py --max-hands 50
 
 - `q` : fermer la fenetre
 - `Echap` : fermer la fenetre
+- `c` : effacer le dessin

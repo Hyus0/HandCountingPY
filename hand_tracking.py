@@ -1,9 +1,11 @@
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import cv2
 import mediapipe as mp
+import numpy as np
 from mediapipe.tasks.python import vision
 from mediapipe.tasks.python.core.base_options import BaseOptions
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
@@ -12,6 +14,7 @@ from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
 
 
 WINDOW_NAME = "Reconnaissance des mains"
+COLOR_WINDOW_NAME = "Couleur"
 MODEL_PATH = Path(__file__).with_name("hand_landmarker.task")
 
 
@@ -46,28 +49,105 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def noop(_value: int) -> None:
+    pass
+
+
+def create_color_controls() -> None:
+    cv2.namedWindow(COLOR_WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(COLOR_WINDOW_NAME, 320, 120)
+    cv2.createTrackbar("R", COLOR_WINDOW_NAME, 255, 255, noop)
+    cv2.createTrackbar("G", COLOR_WINDOW_NAME, 0, 255, noop)
+    cv2.createTrackbar("B", COLOR_WINDOW_NAME, 0, 255, noop)
+
+
+def selected_color() -> tuple[int, int, int]:
+    red = cv2.getTrackbarPos("R", COLOR_WINDOW_NAME)
+    green = cv2.getTrackbarPos("G", COLOR_WINDOW_NAME)
+    blue = cv2.getTrackbarPos("B", COLOR_WINDOW_NAME)
+    return blue, green, red
+
+
+def point(landmark, width: int, height: int) -> tuple[int, int]:
+    return int(landmark.x * width), int(landmark.y * height)
+
+
+def distance(first, second) -> float:
+    return ((first.x - second.x) ** 2 + (first.y - second.y) ** 2) ** 0.5
+
+
+def axis_projection(origin, target, axis_x: float, axis_y: float) -> float:
+    return (target.x - origin.x) * axis_x + (target.y - origin.y) * axis_y
+
+
+def finger_is_extended(hand_landmarks, tip_idx: int, pip_idx: int, mcp_idx: int) -> bool:
+    wrist = hand_landmarks[0]
+    middle_mcp = hand_landmarks[9]
+    axis_x = middle_mcp.x - wrist.x
+    axis_y = middle_mcp.y - wrist.y
+    axis_length = (axis_x**2 + axis_y**2) ** 0.5
+    if axis_length == 0:
+        return False
+
+    axis_x /= axis_length
+    axis_y /= axis_length
+
+    tip = axis_projection(wrist, hand_landmarks[tip_idx], axis_x, axis_y)
+    pip = axis_projection(wrist, hand_landmarks[pip_idx], axis_x, axis_y)
+    mcp = axis_projection(wrist, hand_landmarks[mcp_idx], axis_x, axis_y)
+    return tip > pip + 0.025 and pip > mcp
+
+
+def thumb_is_closed(hand_landmarks) -> bool:
+    thumb_tip = hand_landmarks[4]
+    index_mcp = hand_landmarks[5]
+    middle_mcp = hand_landmarks[9]
+    pinky_mcp = hand_landmarks[17]
+    palm_width = distance(index_mcp, pinky_mcp)
+    palm_center_x = (index_mcp.x + middle_mcp.x + pinky_mcp.x) / 3
+    palm_center_y = (index_mcp.y + middle_mcp.y + pinky_mcp.y) / 3
+    thumb_distance = ((thumb_tip.x - palm_center_x) ** 2 + (thumb_tip.y - palm_center_y) ** 2) ** 0.5
+    return thumb_distance < palm_width * 0.75
+
+
+def only_index_is_up(hand_landmarks) -> bool:
+    index_up = finger_is_extended(hand_landmarks, 8, 6, 5)
+    middle_up = finger_is_extended(hand_landmarks, 12, 10, 9)
+    ring_up = finger_is_extended(hand_landmarks, 16, 14, 13)
+    pinky_up = finger_is_extended(hand_landmarks, 20, 18, 17)
+    return index_up and not middle_up and not ring_up and not pinky_up and thumb_is_closed(hand_landmarks)
+
+
 def draw_hand(frame, hand_landmarks, connections) -> None:
     height, width, _ = frame.shape
 
     for connection in connections:
         start = hand_landmarks[connection.start]
         end = hand_landmarks[connection.end]
-        start_point = (int(start.x * width), int(start.y * height))
-        end_point = (int(end.x * width), int(end.y * height))
-        cv2.line(frame, start_point, end_point, (0, 255, 0), 3)
+        cv2.line(frame, point(start, width, height), point(end, width, height), (0, 255, 0), 3)
 
     for landmark in hand_landmarks:
-        center = (int(landmark.x * width), int(landmark.y * height))
+        center = point(landmark, width, height)
         cv2.circle(frame, center, 6, (0, 0, 255), -1)
         cv2.circle(frame, center, 8, (255, 255, 255), 1)
 
 
-def draw_counter(frame, hand_count: int) -> None:
-    cv2.rectangle(frame, (20, 20), (310, 80), (0, 0, 0), -1)
+def draw_status(frame, hand_count: int, fps: float) -> None:
+    cv2.rectangle(frame, (20, 20), (330, 115), (0, 0, 0), -1)
+    cv2.putText(
+        frame,
+        f"FPS = {fps:.1f}",
+        (35, 58),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
     cv2.putText(
         frame,
         f"nb_de_main = {hand_count}",
-        (35, 62),
+        (35, 98),
         cv2.FONT_HERSHEY_SIMPLEX,
         1.0,
         (255, 255, 255),
@@ -90,6 +170,7 @@ def main() -> int:
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+    create_color_controls()
 
     connections = vision.HandLandmarksConnections.HAND_CONNECTIONS
     options = vision.HandLandmarkerOptions(
@@ -102,6 +183,11 @@ def main() -> int:
     )
 
     frame_timestamp_ms = 0
+    canvas = None
+    last_draw_point = None
+    last_time = time.perf_counter()
+    fps = 0.0
+
     with vision.HandLandmarker.create_from_options(options) as landmarker:
         while True:
             ok, frame = cap.read()
@@ -110,23 +196,48 @@ def main() -> int:
                 break
 
             frame = cv2.flip(frame, 1)
+            if canvas is None or canvas.shape != frame.shape:
+                canvas = np.zeros_like(frame)
+                last_draw_point = None
+
+            now = time.perf_counter()
+            delta = now - last_time
+            last_time = now
+            if delta > 0:
+                current_fps = 1 / delta
+                fps = current_fps if fps == 0 else (fps * 0.9) + (current_fps * 0.1)
+
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             results = landmarker.detect_for_video(mp_image, frame_timestamp_ms)
             frame_timestamp_ms += 1
 
             hand_count = 0
+            draw_point = None
             if results.hand_landmarks:
                 hand_count = len(results.hand_landmarks)
                 for hand_landmarks in results.hand_landmarks:
                     draw_hand(frame, hand_landmarks, connections)
+                    if draw_point is None and only_index_is_up(hand_landmarks):
+                        draw_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
 
-            draw_counter(frame, hand_count)
+            if draw_point is not None:
+                if last_draw_point is not None:
+                    cv2.line(canvas, last_draw_point, draw_point, selected_color(), 8)
+                last_draw_point = draw_point
+            else:
+                last_draw_point = None
+
+            frame = cv2.add(frame, canvas)
+            draw_status(frame, hand_count, fps)
 
             cv2.imshow(WINDOW_NAME, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q")):
                 break
+            if key == ord("c") and canvas is not None:
+                canvas[:] = 0
+                last_draw_point = None
 
     cap.release()
     cv2.destroyAllWindows()
