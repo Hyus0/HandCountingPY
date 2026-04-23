@@ -21,10 +21,12 @@ MODEL_PATH = Path(__file__).with_name("hand_landmarker.task")
 MODE_DRAW = 1
 MODE_CUBE = 2
 MODE_POWER = 3
+MODE_NERD = 4
 GAME_MODES = {
     MODE_DRAW: "Dessin",
     MODE_CUBE: "Cube",
     MODE_POWER: "Pouvoir",
+    MODE_NERD: "Nerd",
 }
 FX_STYLES = [
     {
@@ -116,7 +118,7 @@ def noop(_value: int) -> None:
 def create_color_controls() -> None:
     cv2.namedWindow(COLOR_WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(COLOR_WINDOW_NAME, 390, 250)
-    cv2.createTrackbar("Mode", COLOR_WINDOW_NAME, MODE_DRAW, MODE_POWER, noop)
+    cv2.createTrackbar("Mode", COLOR_WINDOW_NAME, MODE_DRAW, MODE_NERD, noop)
     cv2.createTrackbar("R", COLOR_WINDOW_NAME, 255, 255, noop)
     cv2.createTrackbar("G", COLOR_WINDOW_NAME, 0, 255, noop)
     cv2.createTrackbar("B", COLOR_WINDOW_NAME, 0, 255, noop)
@@ -828,6 +830,119 @@ def draw_power_moon(frame, center: tuple[int, int], size: int, style: dict) -> N
             cv2.fillPoly(frame, [flame], style["impact"], cv2.LINE_AA)
 
 
+def face_box_pixels(detection, width: int, height: int) -> tuple[int, int, int, int]:
+    box = detection.location_data.relative_bounding_box
+    x = max(0, int(box.xmin * width))
+    y = max(0, int(box.ymin * height))
+    w = min(width - x, int(box.width * width))
+    h = min(height - y, int(box.height * height))
+    return x, y, w, h
+
+
+def draw_nerd_face(frame, box: tuple[int, int, int, int]) -> None:
+    x, y, w, h = box
+    if w <= 0 or h <= 0:
+        return
+
+    frame_color = (35, 20, 10)
+    lens_color = (55, 185, 230)
+    shine_color = (235, 245, 255)
+    tooth_color = (245, 245, 230)
+    mouth_color = (10, 10, 10)
+    acne_color = (40, 70, 210)
+    thickness = max(4, int(w * 0.035))
+
+    eye_y = y + int(h * 0.38)
+    lens_w = int(w * 0.34)
+    lens_h = int(h * 0.19)
+    gap = int(w * 0.04)
+    left_x = x + int(w * 0.14)
+    right_x = left_x + lens_w + gap
+    top_y = eye_y - lens_h // 2
+    bottom_y = eye_y + lens_h // 2
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (left_x, top_y), (left_x + lens_w, bottom_y), lens_color, -1, cv2.LINE_AA)
+    cv2.rectangle(overlay, (right_x, top_y), (right_x + lens_w, bottom_y), lens_color, -1, cv2.LINE_AA)
+    cv2.addWeighted(overlay, 0.26, frame, 0.74, 0, frame)
+
+    cv2.rectangle(frame, (left_x, top_y), (left_x + lens_w, bottom_y), frame_color, thickness, cv2.LINE_AA)
+    cv2.rectangle(frame, (right_x, top_y), (right_x + lens_w, bottom_y), frame_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (left_x + lens_w, eye_y), (right_x, eye_y), frame_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (left_x, top_y + thickness), (max(0, x - int(w * 0.08)), top_y), frame_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (right_x + lens_w, top_y + thickness), (min(frame.shape[1] - 1, x + w + int(w * 0.08)), top_y), frame_color, thickness, cv2.LINE_AA)
+    cv2.circle(frame, (left_x + int(lens_w * 0.25), top_y + int(lens_h * 0.25)), max(4, thickness), shine_color, -1, cv2.LINE_AA)
+    cv2.circle(frame, (right_x + int(lens_w * 0.25), top_y + int(lens_h * 0.25)), max(4, thickness), shine_color, -1, cv2.LINE_AA)
+
+    mouth_w = int(w * 0.28)
+    mouth_h = int(h * 0.08)
+    mouth_x = x + w // 2 - mouth_w // 2
+    mouth_y = y + int(h * 0.66)
+    cv2.rectangle(frame, (mouth_x, mouth_y), (mouth_x + mouth_w, mouth_y + mouth_h), mouth_color, -1, cv2.LINE_AA)
+
+    tooth_w = int(w * 0.22)
+    tooth_h = int(h * 0.16)
+    tooth_x = x + w // 2 - tooth_w // 2
+    tooth_y = mouth_y + int(mouth_h * 0.25)
+    cv2.rectangle(frame, (tooth_x, tooth_y), (tooth_x + tooth_w, tooth_y + tooth_h), tooth_color, -1, cv2.LINE_AA)
+    cv2.rectangle(frame, (tooth_x, tooth_y), (tooth_x + tooth_w, tooth_y + tooth_h), (210, 210, 190), 2, cv2.LINE_AA)
+    cv2.line(frame, (tooth_x + tooth_w // 2, tooth_y), (tooth_x + tooth_w // 2, tooth_y + tooth_h), (210, 210, 190), 1, cv2.LINE_AA)
+
+    spots = [
+        (x + int(w * 0.21), y + int(h * 0.58)),
+        (x + int(w * 0.27), y + int(h * 0.65)),
+        (x + int(w * 0.76), y + int(h * 0.59)),
+        (x + int(w * 0.83), y + int(h * 0.66)),
+    ]
+    for spot in spots:
+        cv2.circle(frame, spot, max(2, int(w * 0.014)), acne_color, -1, cv2.LINE_AA)
+
+
+def draw_idea_lamp(frame, index_point: tuple[int, int]) -> None:
+    x, y = index_point
+    bulb_center = (x, max(45, y - 105))
+    glow = np.zeros(frame.shape[:2], dtype=np.uint8)
+    cv2.circle(glow, bulb_center, 58, 255, -1, cv2.LINE_AA)
+    glow = cv2.GaussianBlur(glow, (0, 0), 18)
+    blend_mask(frame, (0, 230, 255), glow, 0.34)
+
+    cv2.circle(frame, bulb_center, 29, (0, 245, 255), -1, cv2.LINE_AA)
+    cv2.circle(frame, bulb_center, 29, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.rectangle(frame, (bulb_center[0] - 11, bulb_center[1] + 24), (bulb_center[0] + 11, bulb_center[1] + 42), (95, 95, 95), -1, cv2.LINE_AA)
+    cv2.line(frame, (bulb_center[0] - 15, bulb_center[1] + 30), (bulb_center[0] + 15, bulb_center[1] + 30), (220, 220, 220), 2, cv2.LINE_AA)
+    cv2.line(frame, (bulb_center[0] - 13, bulb_center[1] + 37), (bulb_center[0] + 13, bulb_center[1] + 37), (220, 220, 220), 2, cv2.LINE_AA)
+
+    for index in range(10):
+        angle = index * math.tau / 10
+        start = (
+            int(bulb_center[0] + math.cos(angle) * 42),
+            int(bulb_center[1] + math.sin(angle) * 42),
+        )
+        end = (
+            int(bulb_center[0] + math.cos(angle) * 62),
+            int(bulb_center[1] + math.sin(angle) * 62),
+        )
+        cv2.line(frame, start, end, (0, 245, 255), 2, cv2.LINE_AA)
+
+    cv2.putText(
+        frame,
+        "Eureka idee!",
+        (max(10, bulb_center[0] - 106), max(34, bulb_center[1] - 54)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.74,
+        (0, 245, 255),
+        3,
+        cv2.LINE_AA,
+    )
+
+
+def draw_nerd_effect(frame, face_results, index_point: tuple[int, int]) -> None:
+    if face_results and face_results.detections:
+        box = face_box_pixels(face_results.detections[0], frame.shape[1], frame.shape[0])
+        draw_nerd_face(frame, box)
+    draw_idea_lamp(frame, index_point)
+
+
 def draw_style_label(frame, style: dict) -> None:
     text = f"style = {style['name']}"
     cv2.rectangle(frame, (20, 166), (330, 206), (0, 0, 0), -1)
@@ -990,7 +1105,10 @@ def main() -> int:
     current_mode = MODE_DRAW
     fps = 0.0
 
-    with vision.HandLandmarker.create_from_options(options) as landmarker:
+    with vision.HandLandmarker.create_from_options(options) as landmarker, mp.solutions.face_detection.FaceDetection(
+        model_selection=0,
+        min_detection_confidence=0.55,
+    ) as face_detector:
         while True:
             ok, frame = cap.read()
             if not ok:
@@ -1037,6 +1155,7 @@ def main() -> int:
             hand_count = 0
             draw_point = None
             moon_point = None
+            nerd_point = None
             fist_hand = None
             control_hand = None
             if results.hand_landmarks:
@@ -1047,6 +1166,8 @@ def main() -> int:
                         draw_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
                     if mode == MODE_POWER and moon_point is None and only_index_is_up(hand_landmarks):
                         moon_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
+                    if mode == MODE_NERD and nerd_point is None and only_index_is_up(hand_landmarks):
+                        nerd_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
                     if mode in (MODE_CUBE, MODE_POWER) and fist_hand is None and is_fist(hand_landmarks):
                         fist_hand = hand_landmarks
 
@@ -1100,6 +1221,9 @@ def main() -> int:
                 draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning, style)
                 if moon_point is not None:
                     draw_power_moon(frame, moon_point, int(58 + charge_level * 0.24), style)
+            if mode == MODE_NERD and nerd_point is not None:
+                face_results = face_detector.process(rgb_frame)
+                draw_nerd_effect(frame, face_results, nerd_point)
             draw_status(frame, hand_count, fps)
             draw_mode_label(frame, mode)
             if mode == MODE_POWER:
@@ -1111,7 +1235,7 @@ def main() -> int:
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q")):
                 break
-            if key in (ord("1"), ord("2"), ord("3")):
+            if key in (ord("1"), ord("2"), ord("3"), ord("4")):
                 cv2.setTrackbarPos("Mode", COLOR_WINDOW_NAME, int(chr(key)))
             if mode == MODE_DRAW and key == ord("c") and canvas is not None:
                 clear_feedback_until = clear_canvas(canvas)
