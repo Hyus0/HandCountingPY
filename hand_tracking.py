@@ -465,6 +465,14 @@ def scaled_color(color: tuple[int, int, int], scale: float) -> tuple[int, int, i
     return tuple(max(0, min(255, int(channel * scale))) for channel in color)
 
 
+def blend_mask(frame, color: tuple[int, int, int], mask, opacity: float) -> None:
+    alpha = (mask.astype(np.float32) / 255.0) * opacity
+    frame[:] = (
+        frame.astype(np.float32) * (1 - alpha[..., None])
+        + np.array(color, dtype=np.float32) * alpha[..., None]
+    ).astype(np.uint8)
+
+
 def draw_charge_aura(frame, center: tuple[int, int], charge: float, style: dict) -> None:
     glow = charge / 100
     if glow <= 0.02:
@@ -752,6 +760,74 @@ def draw_theme_overlay(frame, center: tuple[int, int], charge: float, style: dic
         draw_toxic_cloud(frame, center, charge, style)
 
 
+def draw_power_moon(frame, center: tuple[int, int], size: int, style: dict) -> None:
+    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+    cut_center = (center[0] + int(size * 0.38), center[1] - int(size * 0.08))
+    cv2.circle(mask, center, size, 255, -1, cv2.LINE_AA)
+    cv2.circle(mask, cut_center, int(size * 0.92), 0, -1, cv2.LINE_AA)
+
+    glow = cv2.GaussianBlur(mask, (0, 0), max(12, size // 3))
+    blend_mask(frame, style["aura"], glow, 0.65)
+    blend_mask(frame, style["ring"], mask, 0.95)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(frame, contours, -1, style["core"], 2, cv2.LINE_AA)
+
+    if style["theme"] == "frost":
+        for index in range(6):
+            angle = index * math.tau / 6 + time.perf_counter() * 0.25
+            tip = (
+                int(center[0] + math.cos(angle) * size * 1.45),
+                int(center[1] + math.sin(angle) * size * 1.45),
+            )
+            base = (
+                int(center[0] + math.cos(angle) * size * 1.05),
+                int(center[1] + math.sin(angle) * size * 1.05),
+            )
+            cv2.line(frame, base, tip, style["core"], 2, cv2.LINE_AA)
+    elif style["theme"] == "toxic":
+        for index in range(7):
+            angle = index * math.tau / 7 + time.perf_counter() * 0.55
+            bubble = (
+                int(center[0] + math.cos(angle) * size * 1.18),
+                int(center[1] + math.sin(angle) * size * 0.95),
+            )
+            cv2.circle(frame, bubble, 5 + index % 3, style["spark"], 1, cv2.LINE_AA)
+    elif style["theme"] == "plasma":
+        for index in range(4):
+            angle = index * math.tau / 4 + time.perf_counter() * 1.8
+            start = (
+                int(center[0] + math.cos(angle) * size * 0.75),
+                int(center[1] + math.sin(angle) * size * 0.75),
+            )
+            end = (
+                int(center[0] + math.cos(angle) * size * 1.35),
+                int(center[1] + math.sin(angle) * size * 1.35),
+            )
+            cv2.line(frame, start, end, style["spark"], 2, cv2.LINE_AA)
+    else:
+        for index in range(5):
+            angle = index * math.tau / 5 + time.perf_counter() * 0.7
+            flame = np.array(
+                [
+                    (
+                        int(center[0] + math.cos(angle) * size * 1.35),
+                        int(center[1] + math.sin(angle) * size * 1.35),
+                    ),
+                    (
+                        int(center[0] + math.cos(angle + 0.14) * size),
+                        int(center[1] + math.sin(angle + 0.14) * size),
+                    ),
+                    (
+                        int(center[0] + math.cos(angle - 0.14) * size),
+                        int(center[1] + math.sin(angle - 0.14) * size),
+                    ),
+                ],
+                dtype=np.int32,
+            )
+            cv2.fillPoly(frame, [flame], style["impact"], cv2.LINE_AA)
+
+
 def draw_style_label(frame, style: dict) -> None:
     text = f"style = {style['name']}"
     cv2.rectangle(frame, (20, 166), (330, 206), (0, 0, 0), -1)
@@ -960,6 +1036,7 @@ def main() -> int:
 
             hand_count = 0
             draw_point = None
+            moon_point = None
             fist_hand = None
             control_hand = None
             if results.hand_landmarks:
@@ -968,6 +1045,8 @@ def main() -> int:
                     draw_hand(frame, hand_landmarks, connections)
                     if mode == MODE_DRAW and draw_point is None and only_index_is_up(hand_landmarks):
                         draw_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
+                    if mode == MODE_POWER and moon_point is None and only_index_is_up(hand_landmarks):
+                        moon_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
                     if mode in (MODE_CUBE, MODE_POWER) and fist_hand is None and is_fist(hand_landmarks):
                         fist_hand = hand_landmarks
 
@@ -1019,6 +1098,8 @@ def main() -> int:
             if mode == MODE_POWER:
                 update_release_effects(release_particles, release_rings, impact_lines, release_lightning)
                 draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning, style)
+                if moon_point is not None:
+                    draw_power_moon(frame, moon_point, int(58 + charge_level * 0.24), style)
             draw_status(frame, hand_count, fps)
             draw_mode_label(frame, mode)
             if mode == MODE_POWER:

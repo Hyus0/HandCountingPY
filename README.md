@@ -19,11 +19,12 @@ Modes disponibles :
 
 - `1` : Dessin, avec couleur et suppression du canvas
 - `2` : Cube, avec poing ferme pour afficher le cube et autre main pour regler sa taille
-- `3` : Pouvoir, avec charge du poing et explosion au relachement
+- `3` : Pouvoir, avec charge du poing, explosion au relachement et lune quand l'index seul est leve
 
 Pour lancer l'animation de charge, ferme une main en poing.
 Plus le poing reste ferme, plus l'aura, les particules, les anneaux et les eclairs grandissent.
 Quand tu relaches le poing, l'energie explose avec une onde de choc et des lignes d'impact.
+En mode pouvoir, leve seulement l'index pour afficher une lune de la couleur du style choisi.
 
 Styles disponibles :
 
