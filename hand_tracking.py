@@ -830,13 +830,15 @@ def draw_power_moon(frame, center: tuple[int, int], size: int, style: dict) -> N
             cv2.fillPoly(frame, [flame], style["impact"], cv2.LINE_AA)
 
 
-def face_box_pixels(detection, width: int, height: int) -> tuple[int, int, int, int]:
-    box = detection.location_data.relative_bounding_box
-    x = max(0, int(box.xmin * width))
-    y = max(0, int(box.ymin * height))
-    w = min(width - x, int(box.width * width))
-    h = min(height - y, int(box.height * height))
-    return x, y, w, h
+def largest_face_box(face_detector, rgb_frame) -> tuple[int, int, int, int] | None:
+    if face_detector.empty():
+        return None
+
+    gray = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2GRAY)
+    faces = face_detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(90, 90))
+    if len(faces) == 0:
+        return None
+    return max(faces, key=lambda face: face[2] * face[3])
 
 
 def draw_nerd_face(frame, box: tuple[int, int, int, int]) -> None:
@@ -936,10 +938,9 @@ def draw_idea_lamp(frame, index_point: tuple[int, int]) -> None:
     )
 
 
-def draw_nerd_effect(frame, face_results, index_point: tuple[int, int]) -> None:
-    if face_results and face_results.detections:
-        box = face_box_pixels(face_results.detections[0], frame.shape[1], frame.shape[0])
-        draw_nerd_face(frame, box)
+def draw_nerd_effect(frame, face_box, index_point: tuple[int, int]) -> None:
+    if face_box is not None:
+        draw_nerd_face(frame, face_box)
     draw_idea_lamp(frame, index_point)
 
 
@@ -1085,6 +1086,9 @@ def main() -> int:
         min_hand_presence_confidence=0.65,
         min_tracking_confidence=0.65,
     )
+    face_detector = cv2.CascadeClassifier(
+        str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
+    )
 
     frame_timestamp_ms = 0
     canvas = None
@@ -1105,10 +1109,7 @@ def main() -> int:
     current_mode = MODE_DRAW
     fps = 0.0
 
-    with vision.HandLandmarker.create_from_options(options) as landmarker, mp.solutions.face_detection.FaceDetection(
-        model_selection=0,
-        min_detection_confidence=0.55,
-    ) as face_detector:
+    with vision.HandLandmarker.create_from_options(options) as landmarker:
         while True:
             ok, frame = cap.read()
             if not ok:
@@ -1222,8 +1223,8 @@ def main() -> int:
                 if moon_point is not None:
                     draw_power_moon(frame, moon_point, int(58 + charge_level * 0.24), style)
             if mode == MODE_NERD and nerd_point is not None:
-                face_results = face_detector.process(rgb_frame)
-                draw_nerd_effect(frame, face_results, nerd_point)
+                face_box = largest_face_box(face_detector, rgb_frame)
+                draw_nerd_effect(frame, face_box, nerd_point)
             draw_status(frame, hand_count, fps)
             draw_mode_label(frame, mode)
             if mode == MODE_POWER:
