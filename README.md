@@ -1,0 +1,38 @@
+# HandCountingPY
+
+HandCountingPY est une application Python qui utilise la webcam pour detecter les mains visibles a l'ecran.
+
+Elle affiche :
+
+- les points des doigts et articulations en rouge
+- les connexions de la main en vert
+- le nombre de mains detectees avec `nb_de_main`
+
+## Installation
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+## Lancement
+
+```powershell
+python hand_tracking.py
+```
+
+Changer de camera :
+
+```powershell
+python hand_tracking.py --camera 1
+```
+
+Changer la limite de detection :
+
+```powershell
+python hand_tracking.py --max-hands 50
+```
+
+## Commandes
+
+- `q` : fermer la fenetre
+- `Echap` : fermer la fenetre
