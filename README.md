@@ -11,6 +11,7 @@ Elle affiche :
 
 Pour dessiner, leve seulement l'index et garde les autres doigts fermes.
 La couleur du trait se regle avec les curseurs `R`, `G` et `B` dans la fenetre `Couleur`.
+Le curseur `Clear` efface le dessin.
 
 ## Installation
 

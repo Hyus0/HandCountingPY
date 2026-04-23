@@ -55,10 +55,11 @@ def noop(_value: int) -> None:
 
 def create_color_controls() -> None:
     cv2.namedWindow(COLOR_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(COLOR_WINDOW_NAME, 320, 120)
+    cv2.resizeWindow(COLOR_WINDOW_NAME, 320, 160)
     cv2.createTrackbar("R", COLOR_WINDOW_NAME, 255, 255, noop)
     cv2.createTrackbar("G", COLOR_WINDOW_NAME, 0, 255, noop)
     cv2.createTrackbar("B", COLOR_WINDOW_NAME, 0, 255, noop)
+    cv2.createTrackbar("Clear", COLOR_WINDOW_NAME, 0, 1, noop)
 
 
 def selected_color() -> tuple[int, int, int]:
@@ -66,6 +67,14 @@ def selected_color() -> tuple[int, int, int]:
     green = cv2.getTrackbarPos("G", COLOR_WINDOW_NAME)
     blue = cv2.getTrackbarPos("B", COLOR_WINDOW_NAME)
     return blue, green, red
+
+
+def clear_requested() -> bool:
+    return cv2.getTrackbarPos("Clear", COLOR_WINDOW_NAME) == 1
+
+
+def reset_clear_request() -> None:
+    cv2.setTrackbarPos("Clear", COLOR_WINDOW_NAME, 0)
 
 
 def point(landmark, width: int, height: int) -> tuple[int, int]:
@@ -156,6 +165,28 @@ def draw_status(frame, hand_count: int, fps: float) -> None:
     )
 
 
+def draw_clear_feedback(frame) -> None:
+    _, width, _ = frame.shape
+    text = "canvas cleared"
+    cv2.rectangle(frame, (width - 280, 20), (width - 20, 72), (0, 0, 0), -1)
+    cv2.putText(
+        frame,
+        text,
+        (width - 262, 56),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def clear_canvas(canvas) -> float:
+    if canvas is not None:
+        canvas[:] = 0
+    return time.perf_counter() + 0.8
+
+
 def main() -> int:
     args = parse_args()
 
@@ -186,6 +217,7 @@ def main() -> int:
     canvas = None
     last_draw_point = None
     last_time = time.perf_counter()
+    clear_feedback_until = 0.0
     fps = 0.0
 
     with vision.HandLandmarker.create_from_options(options) as landmarker:
@@ -201,6 +233,11 @@ def main() -> int:
                 last_draw_point = None
 
             now = time.perf_counter()
+            if clear_requested():
+                clear_feedback_until = clear_canvas(canvas)
+                reset_clear_request()
+                last_draw_point = None
+
             delta = now - last_time
             last_time = now
             if delta > 0:
@@ -230,13 +267,15 @@ def main() -> int:
 
             frame = cv2.add(frame, canvas)
             draw_status(frame, hand_count, fps)
+            if time.perf_counter() < clear_feedback_until:
+                draw_clear_feedback(frame)
 
             cv2.imshow(WINDOW_NAME, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q")):
                 break
             if key == ord("c") and canvas is not None:
-                canvas[:] = 0
+                clear_feedback_until = clear_canvas(canvas)
                 last_draw_point = None
 
     cap.release()
