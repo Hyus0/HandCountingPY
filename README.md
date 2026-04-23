@@ -13,6 +13,13 @@ Pour dessiner, leve seulement l'index et garde les autres doigts fermes.
 La couleur du trait se regle avec les curseurs `R`, `G` et `B` dans la fenetre `Couleur`.
 Le curseur `Clear` efface le dessin.
 Le curseur `Style` change le design de l'effet de charge.
+Le curseur `Mode` change le mode de jeu.
+
+Modes disponibles :
+
+- `1` : Dessin, avec couleur et suppression du canvas
+- `2` : Cube, avec poing ferme pour afficher le cube et autre main pour regler sa taille
+- `3` : Pouvoir, avec charge du poing et explosion au relachement
 
 Pour lancer l'animation de charge, ferme une main en poing.
 Plus le poing reste ferme, plus l'aura, les particules, les anneaux et les eclairs grandissent.
@@ -54,3 +61,6 @@ python hand_tracking.py --max-hands 50
 - `q` : fermer la fenetre
 - `Echap` : fermer la fenetre
 - `c` : effacer le dessin
+- `1` : mode dessin
+- `2` : mode cube
+- `3` : mode pouvoir

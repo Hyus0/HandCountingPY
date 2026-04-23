@@ -18,6 +18,14 @@ from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
 WINDOW_NAME = "Reconnaissance des mains"
 COLOR_WINDOW_NAME = "Couleur"
 MODEL_PATH = Path(__file__).with_name("hand_landmarker.task")
+MODE_DRAW = 1
+MODE_CUBE = 2
+MODE_POWER = 3
+GAME_MODES = {
+    MODE_DRAW: "Dessin",
+    MODE_CUBE: "Cube",
+    MODE_POWER: "Pouvoir",
+}
 FX_STYLES = [
     {
         "name": "Inferno",
@@ -103,7 +111,8 @@ def noop(_value: int) -> None:
 
 def create_color_controls() -> None:
     cv2.namedWindow(COLOR_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(COLOR_WINDOW_NAME, 360, 210)
+    cv2.resizeWindow(COLOR_WINDOW_NAME, 390, 250)
+    cv2.createTrackbar("Mode", COLOR_WINDOW_NAME, MODE_DRAW, MODE_POWER, noop)
     cv2.createTrackbar("R", COLOR_WINDOW_NAME, 255, 255, noop)
     cv2.createTrackbar("G", COLOR_WINDOW_NAME, 0, 255, noop)
     cv2.createTrackbar("B", COLOR_WINDOW_NAME, 0, 255, noop)
@@ -121,6 +130,14 @@ def selected_color() -> tuple[int, int, int]:
 def selected_style() -> dict:
     index = cv2.getTrackbarPos("Style", COLOR_WINDOW_NAME)
     return FX_STYLES[max(0, min(index, len(FX_STYLES) - 1))]
+
+
+def selected_game_mode() -> int:
+    mode = cv2.getTrackbarPos("Mode", COLOR_WINDOW_NAME)
+    if mode not in GAME_MODES:
+        cv2.setTrackbarPos("Mode", COLOR_WINDOW_NAME, MODE_DRAW)
+        return MODE_DRAW
+    return mode
 
 
 def clear_requested() -> bool:
@@ -194,6 +211,52 @@ def palm_center(hand_landmarks, width: int, height: int) -> tuple[int, int]:
     x = sum(landmark.x for landmark in palm_points) / len(palm_points)
     y = sum(landmark.y for landmark in palm_points) / len(palm_points)
     return int(x * width), int(y * height)
+
+
+def pinch_ratio(hand_landmarks) -> float:
+    thumb_tip = hand_landmarks[4]
+    index_tip = hand_landmarks[8]
+    index_mcp = hand_landmarks[5]
+    pinky_mcp = hand_landmarks[17]
+    palm_width = max(distance(index_mcp, pinky_mcp), 0.001)
+    return distance(thumb_tip, index_tip) / palm_width
+
+
+def cube_size_from_pinch(hand_landmarks) -> int:
+    ratio = pinch_ratio(hand_landmarks)
+    size = 45 + ratio * 170
+    return int(max(35, min(size, 260)))
+
+
+def draw_cube(frame, center: tuple[int, int], size: int) -> None:
+    x, y = center
+    half = size // 2
+    depth = max(18, int(size * 0.35))
+
+    front = np.array(
+        [
+            [x - half, y - half],
+            [x + half, y - half],
+            [x + half, y + half],
+            [x - half, y + half],
+        ],
+        dtype=np.int32,
+    )
+    back = front + np.array([depth, -depth], dtype=np.int32)
+
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [front], (60, 180, 255))
+    cv2.fillPoly(overlay, [back], (40, 120, 220))
+    side = np.array([front[1], back[1], back[2], front[2]], dtype=np.int32)
+    top = np.array([front[0], back[0], back[1], front[1]], dtype=np.int32)
+    cv2.fillPoly(overlay, [side], (35, 95, 200))
+    cv2.fillPoly(overlay, [top], (90, 210, 255))
+    cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
+
+    for square in (front, back):
+        cv2.polylines(frame, [square], True, (0, 255, 255), 3, cv2.LINE_AA)
+    for index in range(4):
+        cv2.line(frame, tuple(front[index]), tuple(back[index]), (0, 255, 255), 3, cv2.LINE_AA)
 
 
 def random_range(low: float, high: float) -> float:
@@ -542,6 +605,21 @@ def draw_style_core(frame, center: tuple[int, int], charge: float, style: dict) 
 
 def draw_style_label(frame, style: dict) -> None:
     text = f"style = {style['name']}"
+    cv2.rectangle(frame, (20, 166), (330, 206), (0, 0, 0), -1)
+    cv2.putText(
+        frame,
+        text,
+        (35, 194),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.75,
+        style["ring"],
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def draw_mode_label(frame, mode: int) -> None:
+    text = f"mode = {mode} {GAME_MODES[mode]}"
     cv2.rectangle(frame, (20, 122), (330, 162), (0, 0, 0), -1)
     cv2.putText(
         frame,
@@ -549,7 +627,7 @@ def draw_style_label(frame, style: dict) -> None:
         (35, 150),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.75,
-        style["ring"],
+        (255, 255, 255),
         2,
         cv2.LINE_AA,
     )
@@ -678,6 +756,8 @@ def main() -> int:
     release_lightning = []
     was_charging = False
     last_charge_center = None
+    cube_size = 120
+    current_mode = MODE_DRAW
     fps = 0.0
 
     with vision.HandLandmarker.create_from_options(options) as landmarker:
@@ -693,7 +773,21 @@ def main() -> int:
                 last_draw_point = None
 
             now = time.perf_counter()
-            if clear_requested():
+            mode = selected_game_mode()
+            if mode != current_mode:
+                last_draw_point = None
+                was_charging = False
+                charge_level = 0.0
+                charge_particles.clear()
+                charge_rings.clear()
+                charge_lightning.clear()
+                release_particles.clear()
+                release_rings.clear()
+                impact_lines.clear()
+                release_lightning.clear()
+                current_mode = mode
+
+            if mode == MODE_DRAW and clear_requested():
                 clear_feedback_until = clear_canvas(canvas)
                 reset_clear_request()
                 last_draw_point = None
@@ -713,24 +807,38 @@ def main() -> int:
             hand_count = 0
             draw_point = None
             fist_hand = None
+            control_hand = None
             if results.hand_landmarks:
                 hand_count = len(results.hand_landmarks)
                 for hand_landmarks in results.hand_landmarks:
                     draw_hand(frame, hand_landmarks, connections)
-                    if draw_point is None and only_index_is_up(hand_landmarks):
+                    if mode == MODE_DRAW and draw_point is None and only_index_is_up(hand_landmarks):
                         draw_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
-                    if fist_hand is None and is_fist(hand_landmarks):
+                    if mode in (MODE_CUBE, MODE_POWER) and fist_hand is None and is_fist(hand_landmarks):
                         fist_hand = hand_landmarks
 
-            if draw_point is not None:
+                if mode == MODE_CUBE and fist_hand is not None:
+                    for hand_landmarks in results.hand_landmarks:
+                        if hand_landmarks is not fist_hand:
+                            control_hand = hand_landmarks
+                            break
+
+            if mode == MODE_DRAW and draw_point is not None:
                 if last_draw_point is not None:
                     cv2.line(canvas, last_draw_point, draw_point, selected_color(), 8)
                 last_draw_point = draw_point
             else:
                 last_draw_point = None
 
-            frame = cv2.add(frame, canvas)
-            if fist_hand is not None:
+            if mode == MODE_DRAW:
+                frame = cv2.add(frame, canvas)
+            if mode == MODE_CUBE and fist_hand is not None:
+                if control_hand is not None:
+                    target_size = cube_size_from_pinch(control_hand)
+                    cube_size = int(cube_size * 0.8 + target_size * 0.2)
+                cube_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
+                draw_cube(frame, cube_center, cube_size)
+            elif mode == MODE_POWER and fist_hand is not None:
                 charge_level = min(100.0, charge_level + delta * 38)
                 charge_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
                 last_charge_center = charge_center
@@ -738,7 +846,7 @@ def main() -> int:
                 update_charge_effects(charge_center, charge_level, charge_particles, charge_rings, charge_lightning, style)
                 draw_charge_effect(frame, charge_center, charge_level, charge_particles, charge_rings, charge_lightning, style)
             else:
-                if was_charging and last_charge_center is not None:
+                if mode == MODE_POWER and was_charging and last_charge_center is not None:
                     trigger_release_explosion(
                         last_charge_center,
                         charge_level,
@@ -754,18 +862,23 @@ def main() -> int:
                 charge_rings.clear()
                 charge_lightning.clear()
 
-            update_release_effects(release_particles, release_rings, impact_lines, release_lightning)
-            draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning)
+            if mode == MODE_POWER:
+                update_release_effects(release_particles, release_rings, impact_lines, release_lightning)
+                draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning)
             draw_status(frame, hand_count, fps)
-            draw_style_label(frame, style)
-            if time.perf_counter() < clear_feedback_until:
+            draw_mode_label(frame, mode)
+            if mode == MODE_POWER:
+                draw_style_label(frame, style)
+            if mode == MODE_DRAW and time.perf_counter() < clear_feedback_until:
                 draw_clear_feedback(frame)
 
             cv2.imshow(WINDOW_NAME, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q")):
                 break
-            if key == ord("c") and canvas is not None:
+            if key in (ord("1"), ord("2"), ord("3")):
+                cv2.setTrackbarPos("Mode", COLOR_WINDOW_NAME, int(chr(key)))
+            if mode == MODE_DRAW and key == ord("c") and canvas is not None:
                 clear_feedback_until = clear_canvas(canvas)
                 last_draw_point = None
 
