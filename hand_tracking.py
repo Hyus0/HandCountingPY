@@ -127,6 +127,67 @@ def only_index_is_up(hand_landmarks) -> bool:
     return index_up and not middle_up and not ring_up and not pinky_up and thumb_is_closed(hand_landmarks)
 
 
+def is_fist(hand_landmarks) -> bool:
+    index_up = finger_is_extended(hand_landmarks, 8, 6, 5)
+    middle_up = finger_is_extended(hand_landmarks, 12, 10, 9)
+    ring_up = finger_is_extended(hand_landmarks, 16, 14, 13)
+    pinky_up = finger_is_extended(hand_landmarks, 20, 18, 17)
+    return not index_up and not middle_up and not ring_up and not pinky_up and thumb_is_closed(hand_landmarks)
+
+
+def palm_center(hand_landmarks, width: int, height: int) -> tuple[int, int]:
+    palm_points = [hand_landmarks[index] for index in (0, 5, 9, 13, 17)]
+    x = sum(landmark.x for landmark in palm_points) / len(palm_points)
+    y = sum(landmark.y for landmark in palm_points) / len(palm_points)
+    return int(x * width), int(y * height)
+
+
+def pinch_ratio(hand_landmarks) -> float:
+    thumb_tip = hand_landmarks[4]
+    index_tip = hand_landmarks[8]
+    index_mcp = hand_landmarks[5]
+    pinky_mcp = hand_landmarks[17]
+    palm_width = max(distance(index_mcp, pinky_mcp), 0.001)
+    return distance(thumb_tip, index_tip) / palm_width
+
+
+def cube_size_from_pinch(hand_landmarks) -> int:
+    ratio = pinch_ratio(hand_landmarks)
+    size = 45 + ratio * 170
+    return int(max(35, min(size, 260)))
+
+
+def draw_cube(frame, center: tuple[int, int], size: int) -> None:
+    x, y = center
+    half = size // 2
+    depth = max(18, int(size * 0.35))
+
+    front = np.array(
+        [
+            [x - half, y - half],
+            [x + half, y - half],
+            [x + half, y + half],
+            [x - half, y + half],
+        ],
+        dtype=np.int32,
+    )
+    back = front + np.array([depth, -depth], dtype=np.int32)
+
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [front], (60, 180, 255))
+    cv2.fillPoly(overlay, [back], (40, 120, 220))
+    side = np.array([front[1], back[1], back[2], front[2]], dtype=np.int32)
+    top = np.array([front[0], back[0], back[1], front[1]], dtype=np.int32)
+    cv2.fillPoly(overlay, [side], (35, 95, 200))
+    cv2.fillPoly(overlay, [top], (90, 210, 255))
+    cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
+
+    for square in (front, back):
+        cv2.polylines(frame, [square], True, (0, 255, 255), 3, cv2.LINE_AA)
+    for index in range(4):
+        cv2.line(frame, tuple(front[index]), tuple(back[index]), (0, 255, 255), 3, cv2.LINE_AA)
+
+
 def draw_hand(frame, hand_landmarks, connections) -> None:
     height, width, _ = frame.shape
 
@@ -218,6 +279,7 @@ def main() -> int:
     last_draw_point = None
     last_time = time.perf_counter()
     clear_feedback_until = 0.0
+    cube_size = 120
     fps = 0.0
 
     with vision.HandLandmarker.create_from_options(options) as landmarker:
@@ -251,12 +313,22 @@ def main() -> int:
 
             hand_count = 0
             draw_point = None
+            fist_hand = None
+            control_hand = None
             if results.hand_landmarks:
                 hand_count = len(results.hand_landmarks)
                 for hand_landmarks in results.hand_landmarks:
                     draw_hand(frame, hand_landmarks, connections)
                     if draw_point is None and only_index_is_up(hand_landmarks):
                         draw_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
+                    if fist_hand is None and is_fist(hand_landmarks):
+                        fist_hand = hand_landmarks
+
+                if fist_hand is not None:
+                    for hand_landmarks in results.hand_landmarks:
+                        if hand_landmarks is not fist_hand:
+                            control_hand = hand_landmarks
+                            break
 
             if draw_point is not None:
                 if last_draw_point is not None:
@@ -266,6 +338,13 @@ def main() -> int:
                 last_draw_point = None
 
             frame = cv2.add(frame, canvas)
+            if fist_hand is not None:
+                if control_hand is not None:
+                    target_size = cube_size_from_pinch(control_hand)
+                    cube_size = int(cube_size * 0.8 + target_size * 0.2)
+                cube_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
+                draw_cube(frame, cube_center, cube_size)
+
             draw_status(frame, hand_count, fps)
             if time.perf_counter() < clear_feedback_until:
                 draw_clear_feedback(frame)
