@@ -15,6 +15,7 @@ Le curseur `Clear` efface le dessin.
 
 Pour lancer l'animation de charge, ferme une main en poing.
 Plus le poing reste ferme, plus l'aura, les particules, les anneaux et les eclairs grandissent.
+Quand tu relaches le poing, l'energie explose avec une onde de choc et des lignes d'impact.
 
 ## Installation
 

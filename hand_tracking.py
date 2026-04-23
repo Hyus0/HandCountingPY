@@ -178,6 +178,35 @@ def spawn_charge_ring(center: tuple[int, int], rings: list[dict]) -> None:
     )
 
 
+def spawn_release_ring(center: tuple[int, int], charge: float, release_rings: list[dict]) -> None:
+    release_rings.append(
+        {
+            "x": center[0],
+            "y": center[1],
+            "radius": 18,
+            "speed": random_range(10, 18) * (charge / 100 + 0.35),
+            "life": 1.0,
+            "width": random_range(5, 10),
+        }
+    )
+
+
+def spawn_impact_line(center: tuple[int, int], charge: float, impact_lines: list[dict]) -> None:
+    angle = random.random() * math.tau
+    length = random_range(90, 260) * (charge / 100 + 0.25)
+    impact_lines.append(
+        {
+            "x": center[0],
+            "y": center[1],
+            "angle": angle,
+            "length": length,
+            "life": 1.0,
+            "width": random_range(2, 5),
+            "color": (0, 135, 255) if random.random() > 0.35 else (80, 240, 255),
+        }
+    )
+
+
 def spawn_lightning(center: tuple[int, int], charge: float, lightning: list[dict]) -> None:
     angle = random.random() * math.tau
     length = random_range(40, 110) * (charge / 100 + 0.3)
@@ -230,6 +259,68 @@ def update_charge_effects(center: tuple[int, int], charge: float, particles: lis
     lightning[:] = [bolt for bolt in lightning if bolt["life"] > 0]
 
 
+def trigger_release_explosion(
+    center: tuple[int, int],
+    charge: float,
+    release_particles: list[dict],
+    release_rings: list[dict],
+    impact_lines: list[dict],
+    lightning: list[dict],
+) -> None:
+    if charge < 8:
+        return
+
+    particle_count = int(18 + charge * 0.42)
+    line_count = int(10 + charge * 0.16)
+    ring_count = 2 + int(charge > 45) + int(charge > 75)
+
+    for _ in range(particle_count):
+        spawn_charge_particle(center, charge, release_particles)
+        particle = release_particles[-1]
+        particle["vx"] *= -1.7
+        particle["vy"] *= -1.7
+        particle["life"] = 1.15
+        particle["size"] *= 1.35
+
+    for _ in range(ring_count):
+        spawn_release_ring(center, charge, release_rings)
+
+    for _ in range(line_count):
+        spawn_impact_line(center, charge, impact_lines)
+
+    for _ in range(max(3, int(charge / 14))):
+        spawn_lightning(center, charge, lightning)
+
+
+def update_release_effects(
+    release_particles: list[dict],
+    release_rings: list[dict],
+    impact_lines: list[dict],
+    lightning: list[dict],
+) -> None:
+    for particle in release_particles:
+        particle["x"] += particle["vx"]
+        particle["y"] += particle["vy"]
+        particle["vx"] *= 0.92
+        particle["vy"] *= 0.92
+        particle["life"] -= 0.025
+    release_particles[:] = [particle for particle in release_particles if particle["life"] > 0]
+
+    for ring in release_rings:
+        ring["radius"] += ring["speed"]
+        ring["speed"] *= 0.96
+        ring["life"] -= 0.035
+    release_rings[:] = [ring for ring in release_rings if ring["life"] > 0]
+
+    for line in impact_lines:
+        line["life"] -= 0.045
+    impact_lines[:] = [line for line in impact_lines if line["life"] > 0]
+
+    for bolt in lightning:
+        bolt["life"] -= 0.1
+    lightning[:] = [bolt for bolt in lightning if bolt["life"] > 0]
+
+
 def draw_charge_aura(frame, center: tuple[int, int], charge: float) -> None:
     glow = charge / 100
     if glow <= 0.02:
@@ -274,6 +365,37 @@ def draw_charge_rings(frame, rings: list[dict]) -> None:
         )
 
 
+def draw_release_rings(frame, release_rings: list[dict]) -> None:
+    for ring in release_rings:
+        life = max(0.0, min(ring["life"], 1.0))
+        color = (0, int(190 + 65 * life), 255)
+        cv2.circle(
+            frame,
+            (int(ring["x"]), int(ring["y"])),
+            int(ring["radius"]),
+            color,
+            max(1, int(ring["width"] * life)),
+            cv2.LINE_AA,
+        )
+
+
+def draw_impact_lines(frame, impact_lines: list[dict]) -> None:
+    for line in impact_lines:
+        life = max(0.0, min(line["life"], 1.0))
+        start_dist = line["length"] * (1 - life) * 0.4
+        end_dist = start_dist + line["length"] * life
+        start = (
+            int(line["x"] + math.cos(line["angle"]) * start_dist),
+            int(line["y"] + math.sin(line["angle"]) * start_dist),
+        )
+        end = (
+            int(line["x"] + math.cos(line["angle"]) * end_dist),
+            int(line["y"] + math.sin(line["angle"]) * end_dist),
+        )
+        color = tuple(int(channel * life) for channel in line["color"])
+        cv2.line(frame, start, end, color, max(1, int(line["width"] * life)), cv2.LINE_AA)
+
+
 def draw_lightning(frame, lightning: list[dict]) -> None:
     for bolt in lightning:
         points = np.array(bolt["points"], dtype=np.int32)
@@ -311,6 +433,19 @@ def draw_charge_effect(frame, center: tuple[int, int], charge: float, particles:
     cv2.circle(frame, center, int((28 + charge * 0.45) * pulse), (0, 220, 255), 3, cv2.LINE_AA)
     cv2.circle(frame, center, int((15 + charge * 0.25) * pulse), (255, 255, 180), -1, cv2.LINE_AA)
     draw_charge_bar(frame, center, charge)
+
+
+def draw_release_effect(
+    frame,
+    release_particles: list[dict],
+    release_rings: list[dict],
+    impact_lines: list[dict],
+    lightning: list[dict],
+) -> None:
+    draw_release_rings(frame, release_rings)
+    draw_impact_lines(frame, impact_lines)
+    draw_lightning(frame, lightning)
+    draw_charge_particles(frame, release_particles)
 
 
 def draw_hand(frame, hand_landmarks, connections) -> None:
@@ -408,6 +543,12 @@ def main() -> int:
     charge_particles = []
     charge_rings = []
     charge_lightning = []
+    release_particles = []
+    release_rings = []
+    impact_lines = []
+    release_lightning = []
+    was_charging = False
+    last_charge_center = None
     fps = 0.0
 
     with vision.HandLandmarker.create_from_options(options) as landmarker:
@@ -462,14 +603,28 @@ def main() -> int:
             if fist_hand is not None:
                 charge_level = min(100.0, charge_level + delta * 38)
                 charge_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
+                last_charge_center = charge_center
+                was_charging = True
                 update_charge_effects(charge_center, charge_level, charge_particles, charge_rings, charge_lightning)
                 draw_charge_effect(frame, charge_center, charge_level, charge_particles, charge_rings, charge_lightning)
             else:
+                if was_charging and last_charge_center is not None:
+                    trigger_release_explosion(
+                        last_charge_center,
+                        charge_level,
+                        release_particles,
+                        release_rings,
+                        impact_lines,
+                        release_lightning,
+                    )
+                was_charging = False
                 charge_level = max(0.0, charge_level - delta * 80)
                 charge_particles.clear()
                 charge_rings.clear()
                 charge_lightning.clear()
 
+            update_release_effects(release_particles, release_rings, impact_lines, release_lightning)
+            draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning)
             draw_status(frame, hand_count, fps)
             if time.perf_counter() < clear_feedback_until:
                 draw_clear_feedback(frame)
