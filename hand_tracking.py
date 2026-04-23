@@ -37,6 +37,7 @@ FX_STYLES = [
         "alt_impact": (80, 240, 255),
         "shape": "circle",
         "particles": "fire",
+        "theme": "inferno",
     },
     {
         "name": "Plasma",
@@ -48,6 +49,7 @@ FX_STYLES = [
         "alt_impact": (255, 210, 255),
         "shape": "diamond",
         "particles": "spark",
+        "theme": "plasma",
     },
     {
         "name": "Frost",
@@ -59,6 +61,7 @@ FX_STYLES = [
         "alt_impact": (255, 255, 255),
         "shape": "snow",
         "particles": "ice",
+        "theme": "frost",
     },
     {
         "name": "Toxic",
@@ -69,7 +72,8 @@ FX_STYLES = [
         "impact": (80, 255, 40),
         "alt_impact": (0, 190, 120),
         "shape": "triangle",
-        "particles": "orb",
+        "particles": "toxic_cloud",
+        "theme": "toxic",
     },
 ]
 
@@ -265,11 +269,21 @@ def random_range(low: float, high: float) -> float:
 
 def spawn_charge_particle(center: tuple[int, int], charge: float, particles: list[dict], style: dict) -> None:
     angle = random.random() * math.tau
+    theme = style["theme"]
     distance_from_center = random_range(60, 160)
     speed = random_range(1.5, 4.0) * (charge / 100 + 0.3)
     particle_type = style["particles"]
     if particle_type == "fire":
         particle_type = "fire" if random.random() > 0.5 else "spark"
+    if theme == "toxic":
+        distance_from_center = random_range(25, 105)
+        speed = random_range(0.25, 1.25) * (charge / 100 + 0.4)
+    elif theme == "frost":
+        distance_from_center = random_range(70, 190)
+        speed = random_range(0.9, 2.2) * (charge / 100 + 0.45)
+    elif theme == "plasma":
+        speed = random_range(3.0, 6.8) * (charge / 100 + 0.45)
+
     particles.append(
         {
             "x": center[0] + math.cos(angle) * distance_from_center,
@@ -280,6 +294,8 @@ def spawn_charge_particle(center: tuple[int, int], charge: float, particles: lis
             "size": random_range(2, 6),
             "type": particle_type,
             "color": style["spark"],
+            "angle": angle,
+            "spin": random_range(-0.12, 0.12),
         }
     )
 
@@ -294,6 +310,7 @@ def spawn_charge_ring(center: tuple[int, int], rings: list[dict], style: dict) -
             "life": 1.0,
             "width": random_range(1, 3),
             "color": style["ring"],
+            "theme": style["theme"],
         }
     )
 
@@ -308,6 +325,7 @@ def spawn_release_ring(center: tuple[int, int], charge: float, release_rings: li
             "life": 1.0,
             "width": random_range(5, 10),
             "color": style["ring"],
+            "theme": style["theme"],
         }
     )
 
@@ -469,48 +487,80 @@ def draw_charge_particles(frame, particles: list[dict]) -> None:
         y = int(particle["y"])
         color = scaled_color(particle["color"], 0.45 + 0.55 * life)
         if particle["type"] == "fire":
-            size = max(1, int(particle["size"] * life))
-            cv2.circle(frame, (x, y), size, color, -1, cv2.LINE_AA)
+            size = max(4, int(particle["size"] * life * 2.5))
+            flame = np.array(
+                [
+                    (x, y - size * 2),
+                    (x + size, y + size),
+                    (x, y + size * 2),
+                    (x - size, y + size),
+                ],
+                dtype=np.int32,
+            )
+            cv2.fillPoly(frame, [flame], color, cv2.LINE_AA)
+            cv2.circle(frame, (x, y), max(1, size // 2), (0, 240, 255), -1, cv2.LINE_AA)
         elif particle["type"] == "ice":
-            size = max(3, int(particle["size"] * life * 2))
-            cv2.line(frame, (x - size, y), (x + size, y), color, 1, cv2.LINE_AA)
-            cv2.line(frame, (x, y - size), (x, y + size), color, 1, cv2.LINE_AA)
-            cv2.line(frame, (x - size, y - size), (x + size, y + size), color, 1, cv2.LINE_AA)
-            cv2.line(frame, (x - size, y + size), (x + size, y - size), color, 1, cv2.LINE_AA)
-        elif particle["type"] == "orb":
-            size = max(1, int(particle["size"] * life * 1.3))
-            cv2.circle(frame, (x, y), size, color, 1, cv2.LINE_AA)
+            size = max(8, int(particle["size"] * life * 4))
+            angle = particle["angle"] + particle["spin"] * (1 - life) * 20
+            tip = (int(x + math.cos(angle) * size), int(y + math.sin(angle) * size))
+            left = (int(x + math.cos(angle + 2.55) * size * 0.35), int(y + math.sin(angle + 2.55) * size * 0.35))
+            right = (int(x + math.cos(angle - 2.55) * size * 0.35), int(y + math.sin(angle - 2.55) * size * 0.35))
+            cv2.fillPoly(frame, [np.array([tip, left, right], dtype=np.int32)], color, cv2.LINE_AA)
+            cv2.line(frame, (x, y), tip, (255, 255, 255), 1, cv2.LINE_AA)
+        elif particle["type"] == "toxic_cloud":
+            radius = max(8, int(particle["size"] * (1.7 - life) * 5))
+            overlay = frame.copy()
+            cv2.circle(overlay, (x, y), radius, color, -1, cv2.LINE_AA)
+            cv2.circle(overlay, (x + radius // 2, y - radius // 3), max(3, radius // 2), color, -1, cv2.LINE_AA)
+            cv2.circle(overlay, (x - radius // 2, y + radius // 4), max(3, radius // 2), color, -1, cv2.LINE_AA)
+            cv2.addWeighted(overlay, 0.28 * life, frame, 1 - 0.28 * life, 0, frame)
         else:
             end = (int(x + particle["vx"] * 4), int(y + particle["vy"] * 4))
-            cv2.line(frame, (x, y), end, color, max(1, int(particle["size"] * 0.4)), cv2.LINE_AA)
+            mid = (int((x + end[0]) / 2 + random_range(-5, 5)), int((y + end[1]) / 2 + random_range(-5, 5)))
+            cv2.polylines(frame, [np.array([(x, y), mid, end], dtype=np.int32)], False, color, max(1, int(particle["size"] * 0.5)), cv2.LINE_AA)
 
 
 def draw_charge_rings(frame, rings: list[dict]) -> None:
     for ring in rings:
         life = max(0.0, min(ring["life"], 1.0))
         color = scaled_color(ring["color"], 0.45 + 0.55 * life)
-        cv2.circle(
-            frame,
-            (int(ring["x"]), int(ring["y"])),
-            int(ring["radius"]),
-            color,
-            max(1, int(ring["width"] * life * 2)),
-            cv2.LINE_AA,
-        )
+        center = (int(ring["x"]), int(ring["y"]))
+        radius = int(ring["radius"])
+        thickness = max(1, int(ring["width"] * life * 2))
+        if ring.get("theme") == "plasma":
+            points = regular_polygon(center, radius, 4, math.pi / 4 + time.perf_counter())
+            cv2.polylines(frame, [points], True, color, thickness, cv2.LINE_AA)
+        elif ring.get("theme") == "frost":
+            points = regular_polygon(center, radius, 8, math.pi / 8)
+            cv2.polylines(frame, [points], True, color, thickness, cv2.LINE_AA)
+        elif ring.get("theme") == "toxic":
+            for index in range(10):
+                angle = index * math.tau / 10
+                bubble = (
+                    int(center[0] + math.cos(angle) * radius),
+                    int(center[1] + math.sin(angle) * radius),
+                )
+                cv2.circle(frame, bubble, max(2, thickness * 2), color, 1, cv2.LINE_AA)
+        else:
+            cv2.circle(frame, center, radius, color, thickness, cv2.LINE_AA)
 
 
 def draw_release_rings(frame, release_rings: list[dict]) -> None:
     for ring in release_rings:
         life = max(0.0, min(ring["life"], 1.0))
         color = scaled_color(ring["color"], 0.5 + 0.5 * life)
-        cv2.circle(
-            frame,
-            (int(ring["x"]), int(ring["y"])),
-            int(ring["radius"]),
-            color,
-            max(1, int(ring["width"] * life)),
-            cv2.LINE_AA,
-        )
+        center = (int(ring["x"]), int(ring["y"]))
+        radius = int(ring["radius"])
+        thickness = max(1, int(ring["width"] * life))
+        if ring.get("theme") == "frost":
+            cv2.polylines(frame, [regular_polygon(center, radius, 8, math.pi / 8)], True, color, thickness, cv2.LINE_AA)
+        elif ring.get("theme") == "toxic":
+            cv2.circle(frame, center, radius, color, max(1, thickness // 2), cv2.LINE_AA)
+            cv2.circle(frame, center, int(radius * 0.72), color, 1, cv2.LINE_AA)
+        elif ring.get("theme") == "plasma":
+            cv2.polylines(frame, [regular_polygon(center, radius, 4, math.pi / 4)], True, color, thickness, cv2.LINE_AA)
+        else:
+            cv2.circle(frame, center, radius, color, thickness, cv2.LINE_AA)
 
 
 def draw_impact_lines(frame, impact_lines: list[dict]) -> None:
@@ -603,6 +653,105 @@ def draw_style_core(frame, center: tuple[int, int], charge: float, style: dict) 
         cv2.circle(frame, center, inner_radius, core_color, -1, cv2.LINE_AA)
 
 
+def draw_inferno_flames(frame, center: tuple[int, int], charge: float, style: dict) -> None:
+    flame_count = 8
+    radius = int(35 + charge * 0.65)
+    for index in range(flame_count):
+        angle = index * math.tau / flame_count + time.perf_counter() * 0.8
+        base = (
+            int(center[0] + math.cos(angle) * radius * 0.45),
+            int(center[1] + math.sin(angle) * radius * 0.45),
+        )
+        tip = (
+            int(center[0] + math.cos(angle) * radius),
+            int(center[1] + math.sin(angle) * radius),
+        )
+        left = (
+            int(base[0] + math.cos(angle + math.pi / 2) * 12),
+            int(base[1] + math.sin(angle + math.pi / 2) * 12),
+        )
+        right = (
+            int(base[0] + math.cos(angle - math.pi / 2) * 12),
+            int(base[1] + math.sin(angle - math.pi / 2) * 12),
+        )
+        color = style["impact"] if index % 2 else style["ring"]
+        cv2.fillPoly(frame, [np.array([tip, left, right], dtype=np.int32)], color, cv2.LINE_AA)
+
+
+def draw_plasma_arcs(frame, center: tuple[int, int], charge: float, style: dict) -> None:
+    arc_count = 5 + int(charge / 25)
+    radius = 45 + charge * 0.75
+    for index in range(arc_count):
+        angle = index * math.tau / arc_count + time.perf_counter() * 1.6
+        points = []
+        for step in range(5):
+            dist = radius * (0.35 + step * 0.16)
+            jitter = random_range(-12, 12)
+            points.append(
+                (
+                    int(center[0] + math.cos(angle) * dist + math.cos(angle + math.pi / 2) * jitter),
+                    int(center[1] + math.sin(angle) * dist + math.sin(angle + math.pi / 2) * jitter),
+                )
+            )
+        cv2.polylines(frame, [np.array(points, dtype=np.int32)], False, style["spark"], 2, cv2.LINE_AA)
+
+
+def draw_frost_spikes(frame, center: tuple[int, int], charge: float, style: dict) -> None:
+    spike_count = 10
+    inner = 24 + charge * 0.2
+    outer = 65 + charge * 0.9
+    for index in range(spike_count):
+        angle = index * math.tau / spike_count
+        tip = (
+            int(center[0] + math.cos(angle) * outer),
+            int(center[1] + math.sin(angle) * outer),
+        )
+        left = (
+            int(center[0] + math.cos(angle + 0.12) * inner),
+            int(center[1] + math.sin(angle + 0.12) * inner),
+        )
+        right = (
+            int(center[0] + math.cos(angle - 0.12) * inner),
+            int(center[1] + math.sin(angle - 0.12) * inner),
+        )
+        cv2.fillPoly(frame, [np.array([tip, left, right], dtype=np.int32)], style["aura"], cv2.LINE_AA)
+        cv2.polylines(frame, [np.array([tip, left, right], dtype=np.int32)], True, style["core"], 1, cv2.LINE_AA)
+
+
+def draw_toxic_cloud(frame, center: tuple[int, int], charge: float, style: dict) -> None:
+    overlay = frame.copy()
+    cloud_count = 12
+    base_radius = 35 + charge * 0.75
+    for index in range(cloud_count):
+        angle = index * math.tau / cloud_count + time.perf_counter() * 0.35
+        dist = base_radius * random_range(0.25, 0.9)
+        radius = int(random_range(18, 42) * (0.55 + charge / 150))
+        pos = (
+            int(center[0] + math.cos(angle) * dist + random_range(-8, 8)),
+            int(center[1] + math.sin(angle) * dist + random_range(-8, 8)),
+        )
+        cv2.circle(overlay, pos, radius, style["aura"], -1, cv2.LINE_AA)
+    cv2.addWeighted(overlay, 0.26 + charge / 500, frame, 0.74 - charge / 500, 0, frame)
+    for index in range(5):
+        bubble_angle = index * math.tau / 5 + time.perf_counter()
+        bubble_pos = (
+            int(center[0] + math.cos(bubble_angle) * base_radius * 0.55),
+            int(center[1] + math.sin(bubble_angle) * base_radius * 0.55),
+        )
+        cv2.circle(frame, bubble_pos, 6 + index % 3, style["spark"], 1, cv2.LINE_AA)
+
+
+def draw_theme_overlay(frame, center: tuple[int, int], charge: float, style: dict) -> None:
+    if style["theme"] == "inferno":
+        draw_inferno_flames(frame, center, charge, style)
+    elif style["theme"] == "plasma":
+        draw_plasma_arcs(frame, center, charge, style)
+    elif style["theme"] == "frost":
+        draw_frost_spikes(frame, center, charge, style)
+    elif style["theme"] == "toxic":
+        draw_toxic_cloud(frame, center, charge, style)
+
+
 def draw_style_label(frame, style: dict) -> None:
     text = f"style = {style['name']}"
     cv2.rectangle(frame, (20, 166), (330, 206), (0, 0, 0), -1)
@@ -635,6 +784,7 @@ def draw_mode_label(frame, mode: int) -> None:
 
 def draw_charge_effect(frame, center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict], style: dict) -> None:
     draw_charge_aura(frame, center, charge, style)
+    draw_theme_overlay(frame, center, charge, style)
     draw_charge_rings(frame, rings)
     draw_lightning(frame, lightning)
     draw_charge_particles(frame, particles)
@@ -648,7 +798,11 @@ def draw_release_effect(
     release_rings: list[dict],
     impact_lines: list[dict],
     lightning: list[dict],
+    style: dict,
 ) -> None:
+    if release_rings:
+        center = (int(release_rings[-1]["x"]), int(release_rings[-1]["y"]))
+        draw_theme_overlay(frame, center, 70, style)
     draw_release_rings(frame, release_rings)
     draw_impact_lines(frame, impact_lines)
     draw_lightning(frame, lightning)
@@ -864,7 +1018,7 @@ def main() -> int:
 
             if mode == MODE_POWER:
                 update_release_effects(release_particles, release_rings, impact_lines, release_lightning)
-                draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning)
+                draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning, style)
             draw_status(frame, hand_count, fps)
             draw_mode_label(frame, mode)
             if mode == MODE_POWER:

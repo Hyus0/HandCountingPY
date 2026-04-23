@@ -27,10 +27,10 @@ Quand tu relaches le poing, l'energie explose avec une onde de choc et des ligne
 
 Styles disponibles :
 
-- Inferno
-- Plasma
-- Frost
-- Toxic
+- Inferno : flammes et explosion chaude
+- Plasma : arcs electriques et noyau losange
+- Frost : pics et cristaux de glace
+- Toxic : nuage de poison et bulles
 
 ## Installation
 
