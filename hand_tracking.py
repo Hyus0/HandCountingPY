@@ -1,4 +1,6 @@
 import argparse
+import math
+import random
 import sys
 import time
 from pathlib import Path
@@ -142,50 +144,173 @@ def palm_center(hand_landmarks, width: int, height: int) -> tuple[int, int]:
     return int(x * width), int(y * height)
 
 
-def pinch_ratio(hand_landmarks) -> float:
-    thumb_tip = hand_landmarks[4]
-    index_tip = hand_landmarks[8]
-    index_mcp = hand_landmarks[5]
-    pinky_mcp = hand_landmarks[17]
-    palm_width = max(distance(index_mcp, pinky_mcp), 0.001)
-    return distance(thumb_tip, index_tip) / palm_width
+def random_range(low: float, high: float) -> float:
+    return low + random.random() * (high - low)
 
 
-def cube_size_from_pinch(hand_landmarks) -> int:
-    ratio = pinch_ratio(hand_landmarks)
-    size = 45 + ratio * 170
-    return int(max(35, min(size, 260)))
-
-
-def draw_cube(frame, center: tuple[int, int], size: int) -> None:
-    x, y = center
-    half = size // 2
-    depth = max(18, int(size * 0.35))
-
-    front = np.array(
-        [
-            [x - half, y - half],
-            [x + half, y - half],
-            [x + half, y + half],
-            [x - half, y + half],
-        ],
-        dtype=np.int32,
+def spawn_charge_particle(center: tuple[int, int], charge: float, particles: list[dict]) -> None:
+    angle = random.random() * math.tau
+    distance_from_center = random_range(60, 160)
+    speed = random_range(1.5, 4.0) * (charge / 100 + 0.3)
+    particles.append(
+        {
+            "x": center[0] + math.cos(angle) * distance_from_center,
+            "y": center[1] + math.sin(angle) * distance_from_center,
+            "vx": -math.cos(angle) * speed,
+            "vy": -math.sin(angle) * speed,
+            "life": 1.0,
+            "size": random_range(2, 6),
+            "type": "fire" if random.random() > 0.5 else "spark",
+        }
     )
-    back = front + np.array([depth, -depth], dtype=np.int32)
 
-    overlay = frame.copy()
-    cv2.fillPoly(overlay, [front], (60, 180, 255))
-    cv2.fillPoly(overlay, [back], (40, 120, 220))
-    side = np.array([front[1], back[1], back[2], front[2]], dtype=np.int32)
-    top = np.array([front[0], back[0], back[1], front[1]], dtype=np.int32)
-    cv2.fillPoly(overlay, [side], (35, 95, 200))
-    cv2.fillPoly(overlay, [top], (90, 210, 255))
-    cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
 
-    for square in (front, back):
-        cv2.polylines(frame, [square], True, (0, 255, 255), 3, cv2.LINE_AA)
-    for index in range(4):
-        cv2.line(frame, tuple(front[index]), tuple(back[index]), (0, 255, 255), 3, cv2.LINE_AA)
+def spawn_charge_ring(center: tuple[int, int], rings: list[dict]) -> None:
+    rings.append(
+        {
+            "x": center[0],
+            "y": center[1],
+            "radius": random_range(35, 75),
+            "max_radius": random_range(110, 230),
+            "life": 1.0,
+            "width": random_range(1, 3),
+        }
+    )
+
+
+def spawn_lightning(center: tuple[int, int], charge: float, lightning: list[dict]) -> None:
+    angle = random.random() * math.tau
+    length = random_range(40, 110) * (charge / 100 + 0.3)
+    start_x = center[0] + math.cos(angle) * 45
+    start_y = center[1] + math.sin(angle) * 45
+    points = [(start_x, start_y)]
+    steps = int(random_range(4, 9))
+    dx = math.cos(angle) * length / steps
+    dy = math.sin(angle) * length / steps
+    x = start_x
+    y = start_y
+
+    for _ in range(steps):
+        x += dx + random_range(-18, 18)
+        y += dy + random_range(-18, 18)
+        points.append((x, y))
+
+    lightning.append(
+        {
+            "points": points,
+            "life": 1.0,
+            "color": (255, 224, 102) if random.random() > 0.3 else (255, 212, 153),
+        }
+    )
+
+
+def update_charge_effects(center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict]) -> None:
+    if charge > 10 and random.random() < charge / 170:
+        spawn_charge_particle(center, charge, particles)
+    if charge > 20 and random.random() < charge / 330:
+        spawn_charge_ring(center, rings)
+    if charge > 30 and random.random() < charge / 260:
+        spawn_lightning(center, charge, lightning)
+
+    for particle in particles:
+        particle["x"] += particle["vx"]
+        particle["y"] += particle["vy"]
+        particle["vx"] *= 0.95
+        particle["vy"] *= 0.95
+        particle["life"] -= 0.03
+    particles[:] = [particle for particle in particles if particle["life"] > 0]
+
+    for ring in rings:
+        ring["radius"] += 3 * ring["life"]
+        ring["life"] -= 0.025
+    rings[:] = [ring for ring in rings if ring["life"] > 0 and ring["radius"] < ring["max_radius"]]
+
+    for bolt in lightning:
+        bolt["life"] -= 0.12
+    lightning[:] = [bolt for bolt in lightning if bolt["life"] > 0]
+
+
+def draw_charge_aura(frame, center: tuple[int, int], charge: float) -> None:
+    glow = charge / 100
+    if glow <= 0.02:
+        return
+
+    overlay = np.zeros_like(frame)
+    max_radius = int(95 + glow * 110)
+    for radius in range(max_radius, 8, -8):
+        alpha = (1 - radius / max_radius) * 0.18 * glow
+        color = (0, int(90 + 120 * glow), 255)
+        cv2.circle(overlay, center, radius, color, -1, cv2.LINE_AA)
+        cv2.addWeighted(overlay, alpha, frame, 1.0, 0, frame)
+        overlay[:] = 0
+
+
+def draw_charge_particles(frame, particles: list[dict]) -> None:
+    for particle in particles:
+        life = max(0.0, min(particle["life"], 1.0))
+        x = int(particle["x"])
+        y = int(particle["y"])
+        if particle["type"] == "fire":
+            size = max(1, int(particle["size"] * life))
+            color = (0, int(100 + 155 * life), 255)
+            cv2.circle(frame, (x, y), size, color, -1, cv2.LINE_AA)
+        else:
+            end = (int(x + particle["vx"] * 4), int(y + particle["vy"] * 4))
+            color = (int(100 + 155 * life), 255, 255)
+            cv2.line(frame, (x, y), end, color, max(1, int(particle["size"] * 0.4)), cv2.LINE_AA)
+
+
+def draw_charge_rings(frame, rings: list[dict]) -> None:
+    for ring in rings:
+        life = max(0.0, min(ring["life"], 1.0))
+        color = (0, int(130 + 100 * life), 255)
+        cv2.circle(
+            frame,
+            (int(ring["x"]), int(ring["y"])),
+            int(ring["radius"]),
+            color,
+            max(1, int(ring["width"] * life * 2)),
+            cv2.LINE_AA,
+        )
+
+
+def draw_lightning(frame, lightning: list[dict]) -> None:
+    for bolt in lightning:
+        points = np.array(bolt["points"], dtype=np.int32)
+        color = tuple(int(channel * bolt["life"]) for channel in bolt["color"])
+        cv2.polylines(frame, [points], False, color, 2, cv2.LINE_AA)
+
+
+def draw_charge_bar(frame, center: tuple[int, int], charge: float) -> None:
+    width = 190
+    height = 12
+    x = max(20, min(center[0] - width // 2, frame.shape[1] - width - 20))
+    y = max(135, min(center[1] + 100, frame.shape[0] - 35))
+    fill = int(width * charge / 100)
+    cv2.rectangle(frame, (x, y), (x + width, y + height), (25, 25, 25), -1)
+    cv2.rectangle(frame, (x, y), (x + fill, y + height), (0, 170, 255), -1)
+    cv2.rectangle(frame, (x, y), (x + width, y + height), (255, 255, 255), 1)
+    cv2.putText(
+        frame,
+        f"charge = {int(charge)}%",
+        (x, y - 8),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (255, 240, 180),
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def draw_charge_effect(frame, center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict]) -> None:
+    draw_charge_aura(frame, center, charge)
+    draw_charge_rings(frame, rings)
+    draw_lightning(frame, lightning)
+    draw_charge_particles(frame, particles)
+    pulse = 1 + math.sin(time.perf_counter() * 14) * 0.06 * (charge / 100)
+    cv2.circle(frame, center, int((28 + charge * 0.45) * pulse), (0, 220, 255), 3, cv2.LINE_AA)
+    cv2.circle(frame, center, int((15 + charge * 0.25) * pulse), (255, 255, 180), -1, cv2.LINE_AA)
+    draw_charge_bar(frame, center, charge)
 
 
 def draw_hand(frame, hand_landmarks, connections) -> None:
@@ -279,7 +404,10 @@ def main() -> int:
     last_draw_point = None
     last_time = time.perf_counter()
     clear_feedback_until = 0.0
-    cube_size = 120
+    charge_level = 0.0
+    charge_particles = []
+    charge_rings = []
+    charge_lightning = []
     fps = 0.0
 
     with vision.HandLandmarker.create_from_options(options) as landmarker:
@@ -314,7 +442,6 @@ def main() -> int:
             hand_count = 0
             draw_point = None
             fist_hand = None
-            control_hand = None
             if results.hand_landmarks:
                 hand_count = len(results.hand_landmarks)
                 for hand_landmarks in results.hand_landmarks:
@@ -323,12 +450,6 @@ def main() -> int:
                         draw_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
                     if fist_hand is None and is_fist(hand_landmarks):
                         fist_hand = hand_landmarks
-
-                if fist_hand is not None:
-                    for hand_landmarks in results.hand_landmarks:
-                        if hand_landmarks is not fist_hand:
-                            control_hand = hand_landmarks
-                            break
 
             if draw_point is not None:
                 if last_draw_point is not None:
@@ -339,11 +460,15 @@ def main() -> int:
 
             frame = cv2.add(frame, canvas)
             if fist_hand is not None:
-                if control_hand is not None:
-                    target_size = cube_size_from_pinch(control_hand)
-                    cube_size = int(cube_size * 0.8 + target_size * 0.2)
-                cube_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
-                draw_cube(frame, cube_center, cube_size)
+                charge_level = min(100.0, charge_level + delta * 38)
+                charge_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
+                update_charge_effects(charge_center, charge_level, charge_particles, charge_rings, charge_lightning)
+                draw_charge_effect(frame, charge_center, charge_level, charge_particles, charge_rings, charge_lightning)
+            else:
+                charge_level = max(0.0, charge_level - delta * 80)
+                charge_particles.clear()
+                charge_rings.clear()
+                charge_lightning.clear()
 
             draw_status(frame, hand_count, fps)
             if time.perf_counter() < clear_feedback_until:

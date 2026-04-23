@@ -13,11 +13,8 @@ Pour dessiner, leve seulement l'index et garde les autres doigts fermes.
 La couleur du trait se regle avec les curseurs `R`, `G` et `B` dans la fenetre `Couleur`.
 Le curseur `Clear` efface le dessin.
 
-Pour afficher le cube 3D, ferme une main en poing.
-Tant que le poing reste ferme, utilise l'autre main pour regler la taille du cube :
-
-- pouce et index ecartes : agrandir
-- pouce et index rapproches : retrecir
+Pour lancer l'animation de charge, ferme une main en poing.
+Plus le poing reste ferme, plus l'aura, les particules, les anneaux et les eclairs grandissent.
 
 ## Installation
 
