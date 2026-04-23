@@ -12,10 +12,18 @@ Elle affiche :
 Pour dessiner, leve seulement l'index et garde les autres doigts fermes.
 La couleur du trait se regle avec les curseurs `R`, `G` et `B` dans la fenetre `Couleur`.
 Le curseur `Clear` efface le dessin.
+Le curseur `Style` change le design de l'effet de charge.
 
 Pour lancer l'animation de charge, ferme une main en poing.
 Plus le poing reste ferme, plus l'aura, les particules, les anneaux et les eclairs grandissent.
 Quand tu relaches le poing, l'energie explose avec une onde de choc et des lignes d'impact.
+
+Styles disponibles :
+
+- Inferno
+- Plasma
+- Frost
+- Toxic
 
 ## Installation
 

@@ -18,6 +18,52 @@ from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
 WINDOW_NAME = "Reconnaissance des mains"
 COLOR_WINDOW_NAME = "Couleur"
 MODEL_PATH = Path(__file__).with_name("hand_landmarker.task")
+FX_STYLES = [
+    {
+        "name": "Inferno",
+        "core": (255, 255, 180),
+        "aura": (0, 150, 255),
+        "ring": (0, 210, 255),
+        "spark": (120, 255, 255),
+        "impact": (0, 135, 255),
+        "alt_impact": (80, 240, 255),
+        "shape": "circle",
+        "particles": "fire",
+    },
+    {
+        "name": "Plasma",
+        "core": (255, 180, 255),
+        "aura": (255, 60, 190),
+        "ring": (255, 90, 235),
+        "spark": (255, 220, 255),
+        "impact": (255, 40, 180),
+        "alt_impact": (255, 210, 255),
+        "shape": "diamond",
+        "particles": "spark",
+    },
+    {
+        "name": "Frost",
+        "core": (255, 255, 255),
+        "aura": (255, 210, 70),
+        "ring": (255, 240, 120),
+        "spark": (255, 255, 220),
+        "impact": (255, 220, 70),
+        "alt_impact": (255, 255, 255),
+        "shape": "snow",
+        "particles": "ice",
+    },
+    {
+        "name": "Toxic",
+        "core": (160, 255, 120),
+        "aura": (70, 255, 80),
+        "ring": (80, 255, 40),
+        "spark": (210, 255, 80),
+        "impact": (80, 255, 40),
+        "alt_impact": (0, 190, 120),
+        "shape": "triangle",
+        "particles": "orb",
+    },
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,11 +103,12 @@ def noop(_value: int) -> None:
 
 def create_color_controls() -> None:
     cv2.namedWindow(COLOR_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(COLOR_WINDOW_NAME, 320, 160)
+    cv2.resizeWindow(COLOR_WINDOW_NAME, 360, 210)
     cv2.createTrackbar("R", COLOR_WINDOW_NAME, 255, 255, noop)
     cv2.createTrackbar("G", COLOR_WINDOW_NAME, 0, 255, noop)
     cv2.createTrackbar("B", COLOR_WINDOW_NAME, 0, 255, noop)
     cv2.createTrackbar("Clear", COLOR_WINDOW_NAME, 0, 1, noop)
+    cv2.createTrackbar("Style", COLOR_WINDOW_NAME, 0, len(FX_STYLES) - 1, noop)
 
 
 def selected_color() -> tuple[int, int, int]:
@@ -69,6 +116,11 @@ def selected_color() -> tuple[int, int, int]:
     green = cv2.getTrackbarPos("G", COLOR_WINDOW_NAME)
     blue = cv2.getTrackbarPos("B", COLOR_WINDOW_NAME)
     return blue, green, red
+
+
+def selected_style() -> dict:
+    index = cv2.getTrackbarPos("Style", COLOR_WINDOW_NAME)
+    return FX_STYLES[max(0, min(index, len(FX_STYLES) - 1))]
 
 
 def clear_requested() -> bool:
@@ -148,10 +200,13 @@ def random_range(low: float, high: float) -> float:
     return low + random.random() * (high - low)
 
 
-def spawn_charge_particle(center: tuple[int, int], charge: float, particles: list[dict]) -> None:
+def spawn_charge_particle(center: tuple[int, int], charge: float, particles: list[dict], style: dict) -> None:
     angle = random.random() * math.tau
     distance_from_center = random_range(60, 160)
     speed = random_range(1.5, 4.0) * (charge / 100 + 0.3)
+    particle_type = style["particles"]
+    if particle_type == "fire":
+        particle_type = "fire" if random.random() > 0.5 else "spark"
     particles.append(
         {
             "x": center[0] + math.cos(angle) * distance_from_center,
@@ -160,12 +215,13 @@ def spawn_charge_particle(center: tuple[int, int], charge: float, particles: lis
             "vy": -math.sin(angle) * speed,
             "life": 1.0,
             "size": random_range(2, 6),
-            "type": "fire" if random.random() > 0.5 else "spark",
+            "type": particle_type,
+            "color": style["spark"],
         }
     )
 
 
-def spawn_charge_ring(center: tuple[int, int], rings: list[dict]) -> None:
+def spawn_charge_ring(center: tuple[int, int], rings: list[dict], style: dict) -> None:
     rings.append(
         {
             "x": center[0],
@@ -174,11 +230,12 @@ def spawn_charge_ring(center: tuple[int, int], rings: list[dict]) -> None:
             "max_radius": random_range(110, 230),
             "life": 1.0,
             "width": random_range(1, 3),
+            "color": style["ring"],
         }
     )
 
 
-def spawn_release_ring(center: tuple[int, int], charge: float, release_rings: list[dict]) -> None:
+def spawn_release_ring(center: tuple[int, int], charge: float, release_rings: list[dict], style: dict) -> None:
     release_rings.append(
         {
             "x": center[0],
@@ -187,11 +244,12 @@ def spawn_release_ring(center: tuple[int, int], charge: float, release_rings: li
             "speed": random_range(10, 18) * (charge / 100 + 0.35),
             "life": 1.0,
             "width": random_range(5, 10),
+            "color": style["ring"],
         }
     )
 
 
-def spawn_impact_line(center: tuple[int, int], charge: float, impact_lines: list[dict]) -> None:
+def spawn_impact_line(center: tuple[int, int], charge: float, impact_lines: list[dict], style: dict) -> None:
     angle = random.random() * math.tau
     length = random_range(90, 260) * (charge / 100 + 0.25)
     impact_lines.append(
@@ -202,12 +260,12 @@ def spawn_impact_line(center: tuple[int, int], charge: float, impact_lines: list
             "length": length,
             "life": 1.0,
             "width": random_range(2, 5),
-            "color": (0, 135, 255) if random.random() > 0.35 else (80, 240, 255),
+            "color": style["impact"] if random.random() > 0.35 else style["alt_impact"],
         }
     )
 
 
-def spawn_lightning(center: tuple[int, int], charge: float, lightning: list[dict]) -> None:
+def spawn_lightning(center: tuple[int, int], charge: float, lightning: list[dict], style: dict) -> None:
     angle = random.random() * math.tau
     length = random_range(40, 110) * (charge / 100 + 0.3)
     start_x = center[0] + math.cos(angle) * 45
@@ -228,18 +286,18 @@ def spawn_lightning(center: tuple[int, int], charge: float, lightning: list[dict
         {
             "points": points,
             "life": 1.0,
-            "color": (255, 224, 102) if random.random() > 0.3 else (255, 212, 153),
+            "color": style["spark"] if random.random() > 0.3 else style["core"],
         }
     )
 
 
-def update_charge_effects(center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict]) -> None:
+def update_charge_effects(center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict], style: dict) -> None:
     if charge > 10 and random.random() < charge / 170:
-        spawn_charge_particle(center, charge, particles)
+        spawn_charge_particle(center, charge, particles, style)
     if charge > 20 and random.random() < charge / 330:
-        spawn_charge_ring(center, rings)
+        spawn_charge_ring(center, rings, style)
     if charge > 30 and random.random() < charge / 260:
-        spawn_lightning(center, charge, lightning)
+        spawn_lightning(center, charge, lightning, style)
 
     for particle in particles:
         particle["x"] += particle["vx"]
@@ -266,6 +324,7 @@ def trigger_release_explosion(
     release_rings: list[dict],
     impact_lines: list[dict],
     lightning: list[dict],
+    style: dict,
 ) -> None:
     if charge < 8:
         return
@@ -275,7 +334,7 @@ def trigger_release_explosion(
     ring_count = 2 + int(charge > 45) + int(charge > 75)
 
     for _ in range(particle_count):
-        spawn_charge_particle(center, charge, release_particles)
+        spawn_charge_particle(center, charge, release_particles, style)
         particle = release_particles[-1]
         particle["vx"] *= -1.7
         particle["vy"] *= -1.7
@@ -283,13 +342,13 @@ def trigger_release_explosion(
         particle["size"] *= 1.35
 
     for _ in range(ring_count):
-        spawn_release_ring(center, charge, release_rings)
+        spawn_release_ring(center, charge, release_rings, style)
 
     for _ in range(line_count):
-        spawn_impact_line(center, charge, impact_lines)
+        spawn_impact_line(center, charge, impact_lines, style)
 
     for _ in range(max(3, int(charge / 14))):
-        spawn_lightning(center, charge, lightning)
+        spawn_lightning(center, charge, lightning, style)
 
 
 def update_release_effects(
@@ -321,7 +380,11 @@ def update_release_effects(
     lightning[:] = [bolt for bolt in lightning if bolt["life"] > 0]
 
 
-def draw_charge_aura(frame, center: tuple[int, int], charge: float) -> None:
+def scaled_color(color: tuple[int, int, int], scale: float) -> tuple[int, int, int]:
+    return tuple(max(0, min(255, int(channel * scale))) for channel in color)
+
+
+def draw_charge_aura(frame, center: tuple[int, int], charge: float, style: dict) -> None:
     glow = charge / 100
     if glow <= 0.02:
         return
@@ -330,7 +393,7 @@ def draw_charge_aura(frame, center: tuple[int, int], charge: float) -> None:
     max_radius = int(95 + glow * 110)
     for radius in range(max_radius, 8, -8):
         alpha = (1 - radius / max_radius) * 0.18 * glow
-        color = (0, int(90 + 120 * glow), 255)
+        color = scaled_color(style["aura"], 0.55 + 0.45 * glow)
         cv2.circle(overlay, center, radius, color, -1, cv2.LINE_AA)
         cv2.addWeighted(overlay, alpha, frame, 1.0, 0, frame)
         overlay[:] = 0
@@ -341,20 +404,28 @@ def draw_charge_particles(frame, particles: list[dict]) -> None:
         life = max(0.0, min(particle["life"], 1.0))
         x = int(particle["x"])
         y = int(particle["y"])
+        color = scaled_color(particle["color"], 0.45 + 0.55 * life)
         if particle["type"] == "fire":
             size = max(1, int(particle["size"] * life))
-            color = (0, int(100 + 155 * life), 255)
             cv2.circle(frame, (x, y), size, color, -1, cv2.LINE_AA)
+        elif particle["type"] == "ice":
+            size = max(3, int(particle["size"] * life * 2))
+            cv2.line(frame, (x - size, y), (x + size, y), color, 1, cv2.LINE_AA)
+            cv2.line(frame, (x, y - size), (x, y + size), color, 1, cv2.LINE_AA)
+            cv2.line(frame, (x - size, y - size), (x + size, y + size), color, 1, cv2.LINE_AA)
+            cv2.line(frame, (x - size, y + size), (x + size, y - size), color, 1, cv2.LINE_AA)
+        elif particle["type"] == "orb":
+            size = max(1, int(particle["size"] * life * 1.3))
+            cv2.circle(frame, (x, y), size, color, 1, cv2.LINE_AA)
         else:
             end = (int(x + particle["vx"] * 4), int(y + particle["vy"] * 4))
-            color = (int(100 + 155 * life), 255, 255)
             cv2.line(frame, (x, y), end, color, max(1, int(particle["size"] * 0.4)), cv2.LINE_AA)
 
 
 def draw_charge_rings(frame, rings: list[dict]) -> None:
     for ring in rings:
         life = max(0.0, min(ring["life"], 1.0))
-        color = (0, int(130 + 100 * life), 255)
+        color = scaled_color(ring["color"], 0.45 + 0.55 * life)
         cv2.circle(
             frame,
             (int(ring["x"]), int(ring["y"])),
@@ -368,7 +439,7 @@ def draw_charge_rings(frame, rings: list[dict]) -> None:
 def draw_release_rings(frame, release_rings: list[dict]) -> None:
     for ring in release_rings:
         life = max(0.0, min(ring["life"], 1.0))
-        color = (0, int(190 + 65 * life), 255)
+        color = scaled_color(ring["color"], 0.5 + 0.5 * life)
         cv2.circle(
             frame,
             (int(ring["x"]), int(ring["y"])),
@@ -424,14 +495,72 @@ def draw_charge_bar(frame, center: tuple[int, int], charge: float) -> None:
     )
 
 
-def draw_charge_effect(frame, center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict]) -> None:
-    draw_charge_aura(frame, center, charge)
+def regular_polygon(center: tuple[int, int], radius: int, sides: int, rotation: float = 0.0) -> np.ndarray:
+    return np.array(
+        [
+            (
+                int(center[0] + math.cos(rotation + index * math.tau / sides) * radius),
+                int(center[1] + math.sin(rotation + index * math.tau / sides) * radius),
+            )
+            for index in range(sides)
+        ],
+        dtype=np.int32,
+    )
+
+
+def draw_style_core(frame, center: tuple[int, int], charge: float, style: dict) -> None:
+    pulse = 1 + math.sin(time.perf_counter() * 14) * 0.06 * (charge / 100)
+    outer_radius = int((28 + charge * 0.45) * pulse)
+    inner_radius = int((15 + charge * 0.25) * pulse)
+    ring_color = style["ring"]
+    core_color = style["core"]
+
+    if style["shape"] == "diamond":
+        outer = regular_polygon(center, outer_radius, 4, math.pi / 4)
+        inner = regular_polygon(center, inner_radius, 4, math.pi / 4)
+        cv2.polylines(frame, [outer], True, ring_color, 3, cv2.LINE_AA)
+        cv2.fillPoly(frame, [inner], core_color, cv2.LINE_AA)
+    elif style["shape"] == "snow":
+        cv2.circle(frame, center, outer_radius, ring_color, 2, cv2.LINE_AA)
+        for index in range(6):
+            angle = index * math.tau / 6
+            end = (
+                int(center[0] + math.cos(angle) * outer_radius),
+                int(center[1] + math.sin(angle) * outer_radius),
+            )
+            cv2.line(frame, center, end, ring_color, 2, cv2.LINE_AA)
+        cv2.circle(frame, center, inner_radius, core_color, -1, cv2.LINE_AA)
+    elif style["shape"] == "triangle":
+        outer = regular_polygon(center, outer_radius, 3, -math.pi / 2)
+        inner = regular_polygon(center, inner_radius, 3, -math.pi / 2)
+        cv2.polylines(frame, [outer], True, ring_color, 3, cv2.LINE_AA)
+        cv2.fillPoly(frame, [inner], core_color, cv2.LINE_AA)
+    else:
+        cv2.circle(frame, center, outer_radius, ring_color, 3, cv2.LINE_AA)
+        cv2.circle(frame, center, inner_radius, core_color, -1, cv2.LINE_AA)
+
+
+def draw_style_label(frame, style: dict) -> None:
+    text = f"style = {style['name']}"
+    cv2.rectangle(frame, (20, 122), (330, 162), (0, 0, 0), -1)
+    cv2.putText(
+        frame,
+        text,
+        (35, 150),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.75,
+        style["ring"],
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def draw_charge_effect(frame, center: tuple[int, int], charge: float, particles: list[dict], rings: list[dict], lightning: list[dict], style: dict) -> None:
+    draw_charge_aura(frame, center, charge, style)
     draw_charge_rings(frame, rings)
     draw_lightning(frame, lightning)
     draw_charge_particles(frame, particles)
-    pulse = 1 + math.sin(time.perf_counter() * 14) * 0.06 * (charge / 100)
-    cv2.circle(frame, center, int((28 + charge * 0.45) * pulse), (0, 220, 255), 3, cv2.LINE_AA)
-    cv2.circle(frame, center, int((15 + charge * 0.25) * pulse), (255, 255, 180), -1, cv2.LINE_AA)
+    draw_style_core(frame, center, charge, style)
     draw_charge_bar(frame, center, charge)
 
 
@@ -568,6 +697,7 @@ def main() -> int:
                 clear_feedback_until = clear_canvas(canvas)
                 reset_clear_request()
                 last_draw_point = None
+            style = selected_style()
 
             delta = now - last_time
             last_time = now
@@ -605,8 +735,8 @@ def main() -> int:
                 charge_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
                 last_charge_center = charge_center
                 was_charging = True
-                update_charge_effects(charge_center, charge_level, charge_particles, charge_rings, charge_lightning)
-                draw_charge_effect(frame, charge_center, charge_level, charge_particles, charge_rings, charge_lightning)
+                update_charge_effects(charge_center, charge_level, charge_particles, charge_rings, charge_lightning, style)
+                draw_charge_effect(frame, charge_center, charge_level, charge_particles, charge_rings, charge_lightning, style)
             else:
                 if was_charging and last_charge_center is not None:
                     trigger_release_explosion(
@@ -616,6 +746,7 @@ def main() -> int:
                         release_rings,
                         impact_lines,
                         release_lightning,
+                        style,
                     )
                 was_charging = False
                 charge_level = max(0.0, charge_level - delta * 80)
@@ -626,6 +757,7 @@ def main() -> int:
             update_release_effects(release_particles, release_rings, impact_lines, release_lightning)
             draw_release_effect(frame, release_particles, release_rings, impact_lines, release_lightning)
             draw_status(frame, hand_count, fps)
+            draw_style_label(frame, style)
             if time.perf_counter() < clear_feedback_until:
                 draw_clear_feedback(frame)
 
