@@ -21,12 +21,14 @@ Modes disponibles :
 - `2` : Cube, avec poing ferme pour afficher le cube et autre main pour regler sa taille
 - `3` : Pouvoir, avec charge du poing, explosion au relachement et lune quand l'index seul est leve
 - `4` : Nerd, avec lunettes, dents et ampoule Eureka quand l'index seul est leve
+- `5` : Epee, avec une epee 3D qui apparait quand le poing est ferme
 
 Pour lancer l'animation de charge, ferme une main en poing.
 Plus le poing reste ferme, plus l'aura, les particules, les anneaux et les eclairs grandissent.
 Quand tu relaches le poing, l'energie explose avec une onde de choc et des lignes d'impact.
 En mode pouvoir, leve seulement l'index pour afficher une lune de la couleur du style choisi.
 En mode nerd, leve seulement l'index pour afficher les lunettes, les dents et l'ampoule au-dessus du doigt.
+En mode epee, serre le poing pour faire apparaitre une epee 3D tenue dans la main.
 
 Styles disponibles :
 
@@ -68,3 +70,4 @@ python hand_tracking.py --max-hands 50
 - `2` : mode cube
 - `3` : mode pouvoir
 - `4` : mode nerd
+- `5` : mode epee

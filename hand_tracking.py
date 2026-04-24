@@ -22,11 +22,13 @@ MODE_DRAW = 1
 MODE_CUBE = 2
 MODE_POWER = 3
 MODE_NERD = 4
+MODE_SWORD = 5
 GAME_MODES = {
     MODE_DRAW: "Dessin",
     MODE_CUBE: "Cube",
     MODE_POWER: "Pouvoir",
     MODE_NERD: "Nerd",
+    MODE_SWORD: "Epee",
 }
 FX_STYLES = [
     {
@@ -118,7 +120,7 @@ def noop(_value: int) -> None:
 def create_color_controls() -> None:
     cv2.namedWindow(COLOR_WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(COLOR_WINDOW_NAME, 390, 250)
-    cv2.createTrackbar("Mode", COLOR_WINDOW_NAME, MODE_DRAW, MODE_NERD, noop)
+    cv2.createTrackbar("Mode", COLOR_WINDOW_NAME, MODE_DRAW, MODE_SWORD, noop)
     cv2.createTrackbar("R", COLOR_WINDOW_NAME, 255, 255, noop)
     cv2.createTrackbar("G", COLOR_WINDOW_NAME, 0, 255, noop)
     cv2.createTrackbar("B", COLOR_WINDOW_NAME, 0, 255, noop)
@@ -263,6 +265,129 @@ def draw_cube(frame, center: tuple[int, int], size: int) -> None:
         cv2.polylines(frame, [square], True, (0, 255, 255), 3, cv2.LINE_AA)
     for index in range(4):
         cv2.line(frame, tuple(front[index]), tuple(back[index]), (0, 255, 255), 3, cv2.LINE_AA)
+
+
+def hand_axis(hand_landmarks, width: int, height: int) -> tuple[tuple[float, float], tuple[int, int], float]:
+    wrist = point(hand_landmarks[0], width, height)
+    middle_mcp = point(hand_landmarks[9], width, height)
+    dx = middle_mcp[0] - wrist[0]
+    dy = middle_mcp[1] - wrist[1]
+    length = math.hypot(dx, dy)
+    if length < 1:
+        return (0.0, -1.0), wrist, 1.0
+    return (dx / length, dy / length), wrist, length
+
+
+def draw_sword(frame, hand_landmarks) -> None:
+    height, width, _ = frame.shape
+    center = palm_center(hand_landmarks, width, height)
+    (dir_x, dir_y), wrist, axis_length = hand_axis(hand_landmarks, width, height)
+    perp_x = -dir_y
+    perp_y = dir_x
+    palm_width = max(
+        math.hypot(
+            point(hand_landmarks[5], width, height)[0] - point(hand_landmarks[17], width, height)[0],
+            point(hand_landmarks[5], width, height)[1] - point(hand_landmarks[17], width, height)[1],
+        ),
+        axis_length * 0.9,
+    )
+
+    scale = max(34, palm_width * 0.55)
+    guard_center = (
+        int(center[0] + dir_x * scale * 0.3),
+        int(center[1] + dir_y * scale * 0.3),
+    )
+    pommel_center = (
+        int(center[0] - dir_x * scale * 1.2),
+        int(center[1] - dir_y * scale * 1.2),
+    )
+    blade_base = (
+        int(guard_center[0] + dir_x * scale * 0.36),
+        int(guard_center[1] + dir_y * scale * 0.36),
+    )
+    tip = (
+        int(blade_base[0] + dir_x * scale * 4.3),
+        int(blade_base[1] + dir_y * scale * 4.3),
+    )
+
+    blade_half = scale * 0.22
+    blade_depth = scale * 0.14
+    grip_half = scale * 0.16
+    grip_length = scale * 1.15
+    guard_half = scale * 0.7
+    guard_depth = scale * 0.2
+
+    def p(origin, along: float = 0.0, side: float = 0.0, depth: float = 0.0) -> tuple[int, int]:
+        return (
+            int(origin[0] + dir_x * along + perp_x * side + (perp_x + dir_x * 0.35) * depth),
+            int(origin[1] + dir_y * along + perp_y * side + (perp_y + dir_y * 0.35) * depth),
+        )
+
+    blade_front = np.array(
+        [
+            p(blade_base, side=-blade_half),
+            p(blade_base, side=blade_half),
+            p(tip),
+        ],
+        dtype=np.int32,
+    )
+    blade_side = np.array(
+        [
+            p(blade_base, side=blade_half),
+            p(blade_base, side=blade_half, depth=blade_depth),
+            p(tip, depth=blade_depth * 0.5),
+            p(tip),
+        ],
+        dtype=np.int32,
+    )
+    guard_front = np.array(
+        [
+            p(guard_center, side=-guard_half, depth=-guard_depth * 0.4),
+            p(guard_center, side=guard_half, depth=-guard_depth * 0.4),
+            p(guard_center, along=scale * 0.18, side=guard_half, depth=guard_depth * 0.35),
+            p(guard_center, along=scale * 0.18, side=-guard_half, depth=guard_depth * 0.35),
+        ],
+        dtype=np.int32,
+    )
+    grip_front = np.array(
+        [
+            p(center, along=-grip_length, side=-grip_half),
+            p(center, along=-grip_length, side=grip_half),
+            p(center, along=scale * 0.15, side=grip_half * 0.92),
+            p(center, along=scale * 0.15, side=-grip_half * 0.92),
+        ],
+        dtype=np.int32,
+    )
+
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [blade_front], (215, 225, 235), cv2.LINE_AA)
+    cv2.fillPoly(overlay, [blade_side], (120, 145, 165), cv2.LINE_AA)
+    cv2.fillPoly(overlay, [guard_front], (40, 190, 255), cv2.LINE_AA)
+    cv2.fillPoly(overlay, [grip_front], (55, 40, 28), cv2.LINE_AA)
+    cv2.circle(overlay, pommel_center, max(10, int(scale * 0.22)), (70, 210, 255), -1, cv2.LINE_AA)
+    cv2.addWeighted(overlay, 0.62, frame, 0.38, 0, frame)
+
+    cv2.polylines(frame, [blade_front], True, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.polylines(frame, [blade_side], True, (150, 175, 195), 2, cv2.LINE_AA)
+    cv2.polylines(frame, [guard_front], True, (0, 255, 255), 2, cv2.LINE_AA)
+    cv2.polylines(frame, [grip_front], True, (170, 130, 90), 2, cv2.LINE_AA)
+    cv2.circle(frame, pommel_center, max(10, int(scale * 0.22)), (255, 255, 255), 2, cv2.LINE_AA)
+
+    fuller_start = p(blade_base, along=scale * 0.18)
+    fuller_end = p(tip, along=-scale * 0.62)
+    cv2.line(frame, fuller_start, fuller_end, (245, 250, 255), 2, cv2.LINE_AA)
+
+    for index in range(4):
+        ratio = index / 3 if index else 0
+        wrap_center = p(center, along=-grip_length * (0.2 + ratio * 0.62))
+        left = p(wrap_center, side=-grip_half * 0.82)
+        right = p(wrap_center, side=grip_half * 0.82)
+        cv2.line(frame, left, right, (110, 85, 60), 2, cv2.LINE_AA)
+
+    glow = np.zeros(frame.shape[:2], dtype=np.uint8)
+    cv2.line(glow, blade_base, tip, 255, max(10, int(scale * 0.34)), cv2.LINE_AA)
+    glow = cv2.GaussianBlur(glow, (0, 0), max(8, int(scale * 0.16)))
+    blend_mask(frame, (120, 235, 255), glow, 0.18)
 
 
 def random_range(low: float, high: float) -> float:
@@ -1169,7 +1294,7 @@ def main() -> int:
                         moon_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
                     if mode == MODE_NERD and nerd_point is None and only_index_is_up(hand_landmarks):
                         nerd_point = point(hand_landmarks[8], frame.shape[1], frame.shape[0])
-                    if mode in (MODE_CUBE, MODE_POWER) and fist_hand is None and is_fist(hand_landmarks):
+                    if mode in (MODE_CUBE, MODE_POWER, MODE_SWORD) and fist_hand is None and is_fist(hand_landmarks):
                         fist_hand = hand_landmarks
 
                 if mode == MODE_CUBE and fist_hand is not None:
@@ -1193,6 +1318,8 @@ def main() -> int:
                     cube_size = int(cube_size * 0.8 + target_size * 0.2)
                 cube_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
                 draw_cube(frame, cube_center, cube_size)
+            elif mode == MODE_SWORD and fist_hand is not None:
+                draw_sword(frame, fist_hand)
             elif mode == MODE_POWER and fist_hand is not None:
                 charge_level = min(100.0, charge_level + delta * 38)
                 charge_center = palm_center(fist_hand, frame.shape[1], frame.shape[0])
@@ -1236,7 +1363,7 @@ def main() -> int:
             key = cv2.waitKey(1) & 0xFF
             if key in (27, ord("q")):
                 break
-            if key in (ord("1"), ord("2"), ord("3"), ord("4")):
+            if key in (ord("1"), ord("2"), ord("3"), ord("4"), ord("5")):
                 cv2.setTrackbarPos("Mode", COLOR_WINDOW_NAME, int(chr(key)))
             if mode == MODE_DRAW and key == ord("c") and canvas is not None:
                 clear_feedback_until = clear_canvas(canvas)
